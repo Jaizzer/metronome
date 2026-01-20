@@ -10,6 +10,7 @@
 			background: #0e0e0e;
 			color: #eee;
 			font-family: system-ui, -apple-system, sans-serif;
+			overflow-x: hidden;
 		}
 
 		button {
@@ -36,13 +37,40 @@
 			border-radius: 4px;
 		}
 
+		/* Visual Beat Indicators */
+		.beat-container {
+			display: flex;
+			gap: 15px;
+			margin: 20px 0;
+		}
+
+		.dot {
+			width: 20px;
+			height: 20px;
+			background: #222;
+			border-radius: 50%;
+			transition: background 0.1s;
+			border: 1px solid #333;
+		}
+
+		.dot.active-accent {
+			background: #007bff;
+			box-shadow: 0 0 15px #007bff;
+			border-color: #55aaff;
+		}
+
+		.dot.active-normal {
+			background: #eee;
+			box-shadow: 0 0 15px #eee;
+			border-color: #fff;
+		}
+
 		.practice {
 			border: 1px solid #333;
 			padding: 15px;
 			margin: 15px;
 			border-radius: 12px;
 			background: #151515;
-			box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 		}
 
 		.met {
@@ -50,7 +78,6 @@
 			padding: 10px;
 			margin: 10px 0 10px 15px;
 			background: #1c1c1c;
-			border-radius: 0 8px 8px 0;
 			display: flex;
 			align-items: center;
 			gap: 10px;
@@ -70,67 +97,35 @@
 			font-weight: 800;
 			margin: 5px 0;
 			color: #007bff;
-			font-variant-numeric: tabular-nums;
 			line-height: 1;
 		}
 
 		.big-controls {
 			display: flex;
 			gap: 25px;
-			margin: 25px;
+			margin: 10px;
 		}
 
 		.big-controls button {
 			font-size: 40px;
-			width: 90px;
-			height: 90px;
+			width: 80px;
+			height: 80px;
 			border-radius: 50%;
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			border: 2px solid #444;
-		}
-
-		.big-controls button:active {
-			transform: scale(0.95);
-			background: #555;
 		}
 
 		#stop {
 			background: #800;
 			border-color: #a00;
 			padding: 15px 60px;
-			font-size: 1.1rem;
-			margin-top: 40px;
+			margin-top: 30px;
 			text-transform: uppercase;
-			letter-spacing: 2px;
-		}
-
-		#stop:hover {
-			background: #b00;
-		}
-
-		.header {
-			padding: 20px;
-			border-bottom: 1px solid #333;
-			display: flex;
-			justify-content: space-between;
-			align-items: center;
-		}
-
-		#label {
-			font-size: 1.5rem;
-			letter-spacing: 1px;
-			color: #aaa;
-			margin-bottom: 10px;
 		}
 
 		#upcoming-box {
 			background: rgba(255, 255, 255, 0.05);
 			padding: 15px 30px;
 			border-radius: 10px;
-			margin-top: 10px;
-			min-width: 300px;
+			margin-top: 20px;
 		}
 	</style>
 </head>
@@ -138,7 +133,7 @@
 <body>
 
 	<div id="builder">
-		<div class="header">
+		<div style="padding: 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333;">
 			<h1>Practice Builder</h1>
 			<button id="addPracticeBtn">+ Add Practice</button>
 		</div>
@@ -146,9 +141,17 @@
 	</div>
 
 	<div id="player">
-		<div id="label">SECTION NAME</div>
+		<div id="label" style="color: #888; letter-spacing: 2px;">SECTION</div>
+
+		<div class="beat-container">
+			<div class="dot" id="dot-0"></div>
+			<div class="dot" id="dot-1"></div>
+			<div class="dot" id="dot-2"></div>
+			<div class="dot" id="dot-3"></div>
+		</div>
+
 		<div id="bpm-display">120</div>
-		<div id="remaining" style="font-size:26px; font-weight: bold; color: #fff;">00s</div>
+		<div id="remaining" style="font-size:26px; font-weight: bold;">00s</div>
 
 		<div class="big-controls">
 			<button id="minus">−</button>
@@ -156,7 +159,6 @@
 		</div>
 
 		<div id="upcoming-box">
-			<div style="font-size: 12px; color: #888; text-transform: uppercase; margin-bottom: 5px;">Coming Up Next</div>
 			<div id="upcoming-details" style="font-size: 18px; color: #ccc;">--</div>
 		</div>
 
@@ -164,9 +166,6 @@
 	</div>
 
 	<script>
-		/* =====================
-   STATE & AUDIO
-===================== */
 		let practices = JSON.parse(localStorage.getItem("practices") || "[]");
 		const save = () => localStorage.setItem("practices", JSON.stringify(practices));
 
@@ -186,7 +185,7 @@
 			if (audioCtx.state === 'suspended') audioCtx.resume();
 		}
 
-		function playClick(time, accented) {
+		function playClick(time, accented, currentBeat) {
 			const osc = audioCtx.createOscillator();
 			const gain = audioCtx.createGain();
 			osc.frequency.setValueAtTime(accented ? 1600 : 900, time);
@@ -196,18 +195,40 @@
 			gain.connect(audioCtx.destination);
 			osc.start(time);
 			osc.stop(time + 0.05);
+
+			// Visual Sync: Schedule the dot to light up at the exact same time as the audio click
+			const delay = (time - audioCtx.currentTime) * 1000;
+			setTimeout(() => {
+				lightUpDot(currentBeat);
+			}, delay);
+		}
+
+		function lightUpDot(beatIndex) {
+			// Clear all dots
+			document.querySelectorAll('.dot').forEach(d => d.className = 'dot');
+
+			const dot = document.getElementById(`dot-${beatIndex}`);
+			if (dot) {
+				dot.classList.add(beatIndex === 0 ? 'active-accent' : 'active-normal');
+
+				// Turn off dot shortly after
+				setTimeout(() => {
+					dot.className = 'dot';
+				}, 150);
+			}
 		}
 
 		function scheduler() {
 			while (nextTickTime < audioCtx.currentTime + 0.1) {
-				playClick(nextTickTime, beatCounter % 4 === 0);
+				const currentBeat = beatCounter % 4;
+				playClick(nextTickTime, currentBeat === 0, currentBeat);
 				nextTickTime += 60 / currentBPM;
 				beatCounter++;
 			}
 		}
 
 		/* =====================
-		   ENGINE
+		   ENGINE & UI LOGIC
 		===================== */
 		function startPractice(practice) {
 			initAudio();
@@ -225,23 +246,16 @@
 
 			activeMetIndex = index;
 			const met = activePractice.metronomes[index];
-
 			currentBPM = met.startBPM;
 			updateBPMDisplay();
 
 			document.getElementById("label").textContent = met.name.toUpperCase();
 
-			// Format Upcoming Mention
 			const next = activePractice.metronomes[index + 1];
 			const upcomingEl = document.getElementById("upcoming-details");
-			if (next) {
-				upcomingEl.innerHTML = `<strong>${next.name}</strong> • ${next.startBPM} BPM • ${next.duration}s`;
-			} else if (activePractice.loop) {
-				const first = activePractice.metronomes[0];
-				upcomingEl.innerHTML = `<span style="color:#555">Looping to:</span> ${first.name} (${first.startBPM} BPM)`;
-			} else {
-				upcomingEl.textContent = "Finish Line";
-			}
+			upcomingEl.innerHTML = next ?
+				`<strong>Next: ${next.name}</strong> • ${next.startBPM} BPM • ${next.duration}s` :
+				(activePractice.loop ? "Looping to Start..." : "Finish Line");
 
 			beatCounter = 0;
 			nextTickTime = audioCtx.currentTime;
@@ -254,11 +268,6 @@
 			countdownInterval = setInterval(() => {
 				timeLeft--;
 				document.getElementById("remaining").textContent = `${Math.max(0, timeLeft)}s`;
-				if (timeLeft <= 3 && timeLeft > 0) {
-					document.getElementById("remaining").style.color = "#ff4444"; // Warning colors
-				} else {
-					document.getElementById("remaining").style.color = "#fff";
-				}
 			}, 1000);
 
 			clearTimeout(sectionTimeout);
@@ -280,12 +289,10 @@
 			schedulerInterval = null;
 			document.getElementById("builder").style.display = "block";
 			document.getElementById("player").style.display = "none";
+			document.querySelectorAll('.dot').forEach(d => d.className = 'dot'); // Reset dots
 			render();
 		}
 
-		/* =====================
-		   UI BUILDER
-		===================== */
 		function render() {
 			const app = document.getElementById("app");
 			app.innerHTML = "";
@@ -293,12 +300,9 @@
 				const card = document.createElement("div");
 				card.className = "practice";
 				card.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-        <input type="text" value="${p.name}" onchange="practices[${pIdx}].name=this.value; save();" style="font-size:1.2rem; font-weight:bold; border:none; background:transparent; width: 60%;">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <label style="font-size:12px; color:#888;">LOOP <input type="checkbox" ${p.loop ? 'checked' : ''} onchange="practices[${pIdx}].loop=this.checked; save();"></label>
-          <button onclick="practices.splice(${pIdx},1); save(); render();" style="background:#311; border-color:#522; padding:5px 10px;">✕</button>
-        </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <input type="text" value="${p.name}" onchange="practices[${pIdx}].name=this.value; save();" style="font-weight:bold; border:none; background:transparent;">
+        <label style="font-size:12px;">LOOP <input type="checkbox" ${p.loop ? 'checked' : ''} onchange="practices[${pIdx}].loop=this.checked; save();"></label>
       </div>
     `;
 
@@ -306,20 +310,16 @@
 					const mDiv = document.createElement("div");
 					mDiv.className = "met";
 					mDiv.innerHTML = `
-        <input type="text" value="${m.name}" placeholder="Section Name" onchange="practices[${pIdx}].metronomes[${mIdx}].name=this.value; save();" style="flex:2">
-        <input type="number" value="${m.startBPM}" style="width:55px" onchange="practices[${pIdx}].metronomes[${mIdx}].startBPM=parseInt(this.value); save();"> <span style="font-size:10px; color:#666">BPM</span>
-        <input type="number" value="${m.duration}" style="width:55px" onchange="practices[${pIdx}].metronomes[${mIdx}].duration=parseInt(this.value); save();"> <span style="font-size:10px; color:#666">SEC</span>
-        <button onclick="practices[${pIdx}].metronomes.splice(${mIdx},1); save(); render();" style="padding:4px 8px; border:none; background:transparent; color:#666;">✕</button>
+        <input type="text" value="${m.name}" onchange="practices[${pIdx}].metronomes[${mIdx}].name=this.value; save();" style="flex:1">
+        <input type="number" value="${m.startBPM}" style="width:50px" onchange="practices[${pIdx}].metronomes[${mIdx}].startBPM=parseInt(this.value); save();"> <small>BPM</small>
+        <input type="number" value="${m.duration}" style="width:50px" onchange="practices[${pIdx}].metronomes[${mIdx}].duration=parseInt(this.value); save();"> <small>Sec</small>
+        <button onclick="practices[${pIdx}].metronomes.splice(${mIdx},1); save(); render();">✕</button>
       `;
 					card.appendChild(mDiv);
 				});
 
-				const footer = document.createElement("div");
-				footer.style.cssText = "display:flex; gap:10px; margin-top:15px;";
-
 				const addM = document.createElement("button");
-				addM.textContent = "+ ADD SECTION";
-				addM.style.flex = "1";
+				addM.textContent = "+ Section";
 				addM.onclick = () => {
 					p.metronomes.push({
 						name: "New Section",
@@ -331,20 +331,16 @@
 				};
 
 				const playBtn = document.createElement("button");
-				playBtn.textContent = "▶ START PRACTICE";
-				playBtn.style.flex = "2";
+				playBtn.textContent = "▶ START";
 				playBtn.style.background = "#0056b3";
+				playBtn.style.marginLeft = "10px";
 				playBtn.onclick = () => startPractice(p);
 
-				footer.append(addM, playBtn);
-				card.appendChild(footer);
+				card.append(addM, playBtn);
 				app.appendChild(card);
 			});
 		}
 
-		/* =====================
-		   INTERACTION
-		===================== */
 		const changeBPM = (delta) => {
 			currentBPM = Math.max(20, Math.min(300, currentBPM + delta));
 			updateBPMDisplay();
@@ -353,10 +349,9 @@
 		document.getElementById("plus").onclick = () => changeBPM(1);
 		document.getElementById("minus").onclick = () => changeBPM(-1);
 		document.getElementById("stop").onclick = stopEverything;
-
 		document.getElementById("addPracticeBtn").onclick = () => {
 			practices.push({
-				name: "New Routine",
+				name: "Daily Routine",
 				loop: false,
 				metronomes: [{
 					name: "Warmup",
@@ -368,7 +363,6 @@
 			render();
 		};
 
-		// Keyboard Support
 		window.addEventListener('keydown', (e) => {
 			if (document.getElementById("player").style.display === "flex") {
 				if (e.key === "ArrowUp") changeBPM(1);
