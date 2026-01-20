@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<meta charset="UTF-8">
+	<title>Advanced Practice Metronome</title>
+	<style>
+		body {
+			margin: 0;
+			background: #0e0e0e;
+			color: #eee;
+			font-family: system-ui;
+		}
+
+		button,
+		input {
+			font-size: 16px;
+			margin: 4px;
+		}
+
+		.practice,
+		.met {
+			border: 1px solid #333;
+			padding: 8px;
+			margin: 8px;
+		}
+
+		#player {
+			display: none;
+			height: 100vh;
+			justify-content: center;
+			align-items: center;
+			flex-direction: column;
+		}
+
+		#bpm {
+			font-size: 72px;
+		}
+
+		.big button {
+			font-size: 28px;
+			padding: 20px;
+		}
+	</style>
+</head>
+
+<body>
+	<h1>Practice Builder</h1>
+	<div id="app"></div>
+
+	<div id="player">
+		<h2 id="label"></h2>
+		<div id="bpm">120</div>
+		<div id="remaining" style="font-size:20px; margin-bottom:12px;">
+			Time left: --
+		</div>
+
+		<div id="upcoming" style="font-size:16px; opacity:0.7; margin-bottom:20px;">
+			Upcoming: --
+		</div>
+		<div class="big">
+			<button id="minus">−</button>
+			<button id="plus">+</button>
+		</div>
+		<button id="stop">STOP</button>
+	</div>
+
+	<script>
+		/* =====================
+   STORAGE
+===================== */
+		const load = () =>
+			JSON.parse(localStorage.getItem("practices") || "[]");
+
+		const save = p =>
+			localStorage.setItem("practices", JSON.stringify(p));
+
+		let practices = load();
+
+		/* =====================
+		   AUDIO ENGINE
+		===================== */
+		const ctx = new(window.AudioContext || window.webkitAudioContext)();
+		let nextTick = 0;
+		let scheduler = null;
+		let playing = false;
+
+		function clickSound(time, accented) {
+			const osc = ctx.createOscillator();
+			const gain = ctx.createGain();
+
+			osc.frequency.value = accented ? 1800 : 1000;
+			gain.gain.value = accented ? 0.9 : 0.5;
+
+			osc.connect(gain);
+			gain.connect(ctx.destination);
+
+			osc.start(time);
+			osc.stop(time + 0.03);
+		}
+
+		let beatCounter = 0;
+		const beatsPerBar = 4;
+
+		function schedule(bpm) {
+			const interval = 60 / bpm;
+
+			while (nextTick < ctx.currentTime + 0.1) {
+				const isAccent = (beatCounter % beatsPerBar) === 0;
+
+				clickSound(nextTick, isAccent);
+
+				beatCounter++;
+				nextTick += interval;
+			}
+		}
+
+		/* =====================
+		   PLAYER STATE
+		===================== */
+		let state = "IDLE";
+		let currentBPM = 120;
+		let sectionEndTime = 0;
+		let countdownTimer = null;
+
+		let activePractice = null;
+		let activeMetronomeIndex = -1;
+
+		function startScheduler() {
+			nextTick = ctx.currentTime;
+			scheduler = setInterval(() => {
+				if (!playing) return;
+
+				schedule(currentBPM);
+				bpm.textContent = Math.round(currentBPM);
+			}, 25);
+		}
+
+		function stopScheduler() {
+			clearInterval(scheduler);
+			scheduler = null;
+		}
+
+		/* =====================
+		   PRACTICE PLAYER
+		===================== */
+		function playPractice(practice) {
+			state = "PLAYING";
+			playing = true;
+			enterPlayer();
+
+			let i = 0;
+			activePractice = practice;
+
+			const playNext = () => {
+				if (i >= practice.metronomes.length) {
+					if (practice.loop) {
+						i = 0;
+					} else {
+						stopPractice();
+						return;
+					}
+				}
+
+				const m = practice.metronomes[i];
+				activeMetronomeIndex = i;
+				label.textContent = m.name;
+				document.getElementById("label").textContent = m.name;
+
+				beatCounter = 0;
+
+				currentBPM = m.startBPM;
+				bpm.textContent = Math.round(currentBPM);
+
+				document.getElementById("remaining").textContent = "Time left: --";
+
+				sectionEndTime = Date.now() + m.duration * 1000;
+
+				clearInterval(countdownTimer);
+				countdownTimer = setInterval(() => {
+					const remainingMs = sectionEndTime - Date.now();
+					const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+					document.getElementById("remaining").textContent =
+						"Time left: " + remainingSec + "s";
+				}, 250);
+
+				const next = practice.metronomes[i + 1];
+				if (next) {
+					document.getElementById("upcoming").textContent =
+						`Upcoming: ${next.name}, ${next.startBPM} BPM, ${next.duration}s`;
+				} else {
+					document.getElementById("upcoming").textContent = "Upcoming: --";
+				}
+
+				setTimeout(() => {
+					i++;
+					playNext();
+				}, m.duration * 1000);
+			};
+
+			startScheduler();
+			playNext();
+		}
+
+		function stopPractice() {
+			state = "STOPPED";
+			playing = false;
+			activePractice = null;
+			activeMetronomeIndex = -1;
+			beatCounter = 0;
+			stopScheduler();
+
+			clearInterval(countdownTimer);
+			countdownTimer = null;
+			document.getElementById("remaining").textContent = "Time left: --";
+			document.getElementById("upcoming").textContent = "Upcoming: --";
+
+			exitPlayer();
+			render();
+		}
+
+		/* =====================
+		   UI
+		===================== */
+		const app = document.getElementById("app");
+		const player = document.getElementById("player");
+
+		function enterPlayer() {
+			app.style.display = "none";
+			player.style.display = "flex";
+		}
+
+		function exitPlayer() {
+			player.style.display = "none";
+			app.style.display = "block";
+		}
+
+		plus.onclick = () => {
+			currentBPM = Math.max(20, currentBPM + 1);
+
+			if (activePractice && activeMetronomeIndex >= 0) {
+				activePractice.metronomes[activeMetronomeIndex].startBPM = currentBPM;
+				save(practices);
+			}
+		};
+
+		minus.onclick = () => {
+			currentBPM = Math.max(20, currentBPM - 1);
+
+			if (activePractice && activeMetronomeIndex >= 0) {
+				activePractice.metronomes[activeMetronomeIndex].startBPM = currentBPM;
+				save(practices);
+			}
+		};
+		stop.onclick = stopPractice;
+		/* =====================
+		   BUILDER UI
+		===================== */
+		function render() {
+			app.innerHTML = "";
+			const addP = document.createElement("button");
+			addP.textContent = "Add Practice";
+			addP.onclick = () => {
+				practices.push({
+					name: "Practice",
+					loop: false,
+					metronomes: []
+				});
+				save(practices);
+				render();
+			};
+			app.appendChild(addP);
+
+			practices.forEach(p => {
+				const d = document.createElement("div");
+				d.className = "practice";
+
+				const loop = document.createElement("input");
+				loop.type = "checkbox";
+				loop.checked = p.loop;
+				loop.onchange = () => {
+					p.loop = loop.checked;
+					save(practices);
+				};
+
+				d.innerHTML = `<b>${p.name}</b>`;
+				d.append(" Loop ");
+				d.appendChild(loop);
+
+				p.metronomes.forEach(m => {
+					const md = document.createElement("div");
+					md.className = "met";
+					md.innerHTML = `
+        <input value="${m.name}">
+        <input type="number" value="${m.startBPM}">
+        <input type="number" value="${m.duration}">s
+      `;
+					const inputs = md.querySelectorAll("input");
+					inputs[0].oninput = e => {
+						m.name = e.target.value;
+						save(practices);
+					};
+
+					inputs[1].oninput = e => {
+						m.startBPM = +e.target.value;
+						save(practices);
+					};
+
+					inputs[2].oninput = e => {
+						m.duration = +e.target.value;
+						save(practices);
+					};
+					d.appendChild(md);
+				});
+
+				const addM = document.createElement("button");
+				addM.textContent = "Add Metronome";
+				addM.onclick = () => {
+					p.metronomes.push({
+						name: "Section",
+						startBPM: 100,
+						duration: 30
+					});
+					save(practices);
+					render();
+				};
+
+				const play = document.createElement("button");
+				play.textContent = "Play";
+				play.onclick = () => playPractice(p);
+
+				d.append(addM, play);
+				app.appendChild(d);
+			});
+
+			save(practices);
+		}
+
+		render();
+	</script>
+</body>
+
+</html>
