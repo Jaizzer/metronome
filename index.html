@@ -37,7 +37,6 @@
 			border-radius: 4px;
 		}
 
-		/* Visual Beat Indicators */
 		.beat-container {
 			display: flex;
 			gap: 15px;
@@ -45,8 +44,8 @@
 		}
 
 		.dot {
-			width: 20px;
-			height: 20px;
+			width: 22px;
+			height: 22px;
 			background: #222;
 			border-radius: 50%;
 			transition: background 0.1s;
@@ -98,27 +97,64 @@
 			margin: 5px 0;
 			color: #007bff;
 			line-height: 1;
+			transition: opacity 0.3s;
+			font-variant-numeric: tabular-nums;
+		}
+
+		.paused #bpm-display {
+			opacity: 0.3;
 		}
 
 		.big-controls {
 			display: flex;
-			gap: 25px;
+			gap: 15px;
 			margin: 10px;
+			align-items: center;
 		}
 
 		.big-controls button {
-			font-size: 40px;
-			width: 80px;
-			height: 80px;
+			font-size: 30px;
+			width: 75px;
+			height: 75px;
 			border-radius: 50%;
+			border: 2px solid #333;
+		}
+
+		.btn-main {
+			width: 95px !important;
+			height: 95px !important;
+			font-size: 40px !important;
+			background: #0056b3;
+			border-color: #007bff !important;
+		}
+
+		.nav-controls {
+			display: flex;
+			gap: 20px;
+			margin-top: 20px;
+		}
+
+		.nav-controls button {
+			background: #222;
+			padding: 10px 25px;
+			font-size: 14px;
+			border-radius: 20px;
 		}
 
 		#stop {
-			background: #800;
-			border-color: #a00;
-			padding: 15px 60px;
-			margin-top: 30px;
+			background: #300;
+			border-color: #500;
+			padding: 10px 40px;
+			margin-top: 40px;
 			text-transform: uppercase;
+			font-size: 12px;
+			opacity: 0.6;
+			color: #f66;
+		}
+
+		#stop:hover {
+			opacity: 1;
+			background: #500;
 		}
 
 		#upcoming-box {
@@ -126,6 +162,8 @@
 			padding: 15px 30px;
 			border-radius: 10px;
 			margin-top: 20px;
+			min-width: 340px;
+			border: 1px solid #222;
 		}
 	</style>
 </head>
@@ -141,7 +179,7 @@
 	</div>
 
 	<div id="player">
-		<div id="label" style="color: #888; letter-spacing: 2px;">SECTION</div>
+		<div id="label" style="color: #888; letter-spacing: 2px; font-weight: bold;">SECTION</div>
 
 		<div class="beat-container">
 			<div class="dot" id="dot-0"></div>
@@ -151,15 +189,21 @@
 		</div>
 
 		<div id="bpm-display">120</div>
-		<div id="remaining" style="font-size:26px; font-weight: bold;">00s</div>
+		<div id="remaining" style="font-size:26px; font-weight: bold; font-family: monospace;">00s</div>
 
 		<div class="big-controls">
 			<button id="minus">−</button>
+			<button id="playPause" class="btn-main">II</button>
 			<button id="plus">+</button>
 		</div>
 
+		<div class="nav-controls">
+			<button id="prevBtn">« PREV</button>
+			<button id="nextBtn">NEXT »</button>
+		</div>
+
 		<div id="upcoming-box">
-			<div id="upcoming-details" style="font-size: 18px; color: #ccc;">--</div>
+			<div id="upcoming-details" style="font-size: 16px; color: #aaa;">--</div>
 		</div>
 
 		<button id="stop">STOP (ESC)</button>
@@ -172,13 +216,14 @@
 		let audioCtx = null;
 		let nextTickTime = 0;
 		let schedulerInterval = null;
-		let sectionTimeout = null;
 		let countdownInterval = null;
 
 		let currentBPM = 120;
 		let activePractice = null;
 		let activeMetIndex = -1;
 		let beatCounter = 0;
+		let isPaused = false;
+		let timeLeftInSection = 0;
 
 		function initAudio() {
 			if (!audioCtx) audioCtx = new(window.AudioContext || window.webkitAudioContext)();
@@ -196,22 +241,17 @@
 			osc.start(time);
 			osc.stop(time + 0.05);
 
-			// Visual Sync: Schedule the dot to light up at the exact same time as the audio click
 			const delay = (time - audioCtx.currentTime) * 1000;
 			setTimeout(() => {
-				lightUpDot(currentBeat);
+				if (!isPaused) lightUpDot(currentBeat);
 			}, delay);
 		}
 
 		function lightUpDot(beatIndex) {
-			// Clear all dots
 			document.querySelectorAll('.dot').forEach(d => d.className = 'dot');
-
 			const dot = document.getElementById(`dot-${beatIndex}`);
 			if (dot) {
 				dot.classList.add(beatIndex === 0 ? 'active-accent' : 'active-normal');
-
-				// Turn off dot shortly after
 				setTimeout(() => {
 					dot.className = 'dot';
 				}, 150);
@@ -219,80 +259,115 @@
 		}
 
 		function scheduler() {
+			if (isPaused) return;
 			while (nextTickTime < audioCtx.currentTime + 0.1) {
 				const currentBeat = beatCounter % 4;
 				playClick(nextTickTime, currentBeat === 0, currentBeat);
+				// CRITICAL: Always use currentBPM so manual changes reflect immediately
 				nextTickTime += 60 / currentBPM;
 				beatCounter++;
 			}
 		}
 
 		/* =====================
-		   ENGINE & UI LOGIC
+		   CORE ENGINE
 		===================== */
 		function startPractice(practice) {
 			initAudio();
 			activePractice = practice;
+			isPaused = false;
 			document.getElementById("builder").style.display = "none";
 			document.getElementById("player").style.display = "flex";
+			document.getElementById("player").classList.remove("paused");
 			runSection(0);
 		}
 
 		function runSection(index) {
+			if (!activePractice) return;
+
 			if (index >= activePractice.metronomes.length) {
 				if (activePractice.loop) return runSection(0);
 				return stopEverything();
 			}
+			if (index < 0) index = 0;
 
 			activeMetIndex = index;
 			const met = activePractice.metronomes[index];
+
+			// Set BPM to the section's default only when entering the section
 			currentBPM = met.startBPM;
-			updateBPMDisplay();
+			timeLeftInSection = met.duration;
 
-			document.getElementById("label").textContent = met.name.toUpperCase();
-
-			const next = activePractice.metronomes[index + 1];
-			const upcomingEl = document.getElementById("upcoming-details");
-			upcomingEl.innerHTML = next ?
-				`<strong>Next: ${next.name}</strong> • ${next.startBPM} BPM • ${next.duration}s` :
-				(activePractice.loop ? "Looping to Start..." : "Finish Line");
-
-			beatCounter = 0;
-			nextTickTime = audioCtx.currentTime;
+			updatePlayerUI();
+			resetTiming();
 
 			if (!schedulerInterval) schedulerInterval = setInterval(scheduler, 25);
-
-			let timeLeft = met.duration;
-			document.getElementById("remaining").textContent = `${timeLeft}s`;
-			clearInterval(countdownInterval);
-			countdownInterval = setInterval(() => {
-				timeLeft--;
-				document.getElementById("remaining").textContent = `${Math.max(0, timeLeft)}s`;
-			}, 1000);
-
-			clearTimeout(sectionTimeout);
-			sectionTimeout = setTimeout(() => runSection(index + 1), met.duration * 1000);
+			startCountdown();
 		}
 
-		function updateBPMDisplay() {
-			document.getElementById("bpm-display").textContent = currentBPM;
-			if (activePractice && activeMetIndex !== -1) {
-				activePractice.metronomes[activeMetIndex].startBPM = currentBPM;
-				save();
+		function resetTiming() {
+			beatCounter = 0;
+			nextTickTime = audioCtx.currentTime;
+		}
+
+		function startCountdown() {
+			clearInterval(countdownInterval);
+			countdownInterval = setInterval(() => {
+				if (!isPaused) {
+					timeLeftInSection--;
+					document.getElementById("remaining").textContent = `${Math.max(0, timeLeftInSection)}s`;
+
+					if (timeLeftInSection <= 0) {
+						runSection(activeMetIndex + 1);
+					}
+				}
+			}, 1000);
+		}
+
+		function togglePause() {
+			isPaused = !isPaused;
+			const btn = document.getElementById("playPause");
+			btn.textContent = isPaused ? "▶" : "II";
+			document.getElementById("player").classList.toggle("paused", isPaused);
+			if (!isPaused) {
+				initAudio();
+				nextTickTime = audioCtx.currentTime;
 			}
 		}
 
+		// Fixed: This only updates the visual/data, doesn't reset currentBPM from scratch
+		function updatePlayerUI() {
+			if (activeMetIndex === -1) return;
+			const met = activePractice.metronomes[activeMetIndex];
+
+			document.getElementById("bpm-display").textContent = Math.round(currentBPM);
+			document.getElementById("label").textContent = met.name.toUpperCase();
+			document.getElementById("remaining").textContent = `${timeLeftInSection}s`;
+
+			const next = activePractice.metronomes[activeMetIndex + 1];
+			const upcomingEl = document.getElementById("upcoming-details");
+			upcomingEl.innerHTML = next ?
+				`<span style="color:#666">NEXT:</span> <strong>${next.name}</strong> • ${next.startBPM} BPM` :
+				(activePractice.loop ? "Looping to Start..." : "End of Routine");
+
+			// Save changes to local storage so they persist
+			met.startBPM = currentBPM;
+			save();
+		}
+
 		function stopEverything() {
+			isPaused = false;
 			clearInterval(schedulerInterval);
 			clearInterval(countdownInterval);
-			clearTimeout(sectionTimeout);
 			schedulerInterval = null;
 			document.getElementById("builder").style.display = "block";
 			document.getElementById("player").style.display = "none";
-			document.querySelectorAll('.dot').forEach(d => d.className = 'dot'); // Reset dots
 			render();
 		}
 
+		/* =====================
+		   RENDERER
+		===================== */
 		function render() {
 			const app = document.getElementById("app");
 			app.innerHTML = "";
@@ -301,22 +376,31 @@
 				card.className = "practice";
 				card.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-        <input type="text" value="${p.name}" onchange="practices[${pIdx}].name=this.value; save();" style="font-weight:bold; border:none; background:transparent;">
-        <label style="font-size:12px;">LOOP <input type="checkbox" ${p.loop ? 'checked' : ''} onchange="practices[${pIdx}].loop=this.checked; save();"></label>
+        <input type="text" value="${p.name}" onchange="practices[${pIdx}].name=this.value; save();" style="font-weight:bold; border:none; background:transparent; font-size:1.1rem; color:#007bff;">
+        <label style="font-size:11px; color:#666; letter-spacing:1px;">LOOP <input type="checkbox" ${p.loop ? 'checked' : ''} onchange="practices[${pIdx}].loop=this.checked; save();"></label>
       </div>
     `;
-
 				p.metronomes.forEach((m, mIdx) => {
 					const mDiv = document.createElement("div");
 					mDiv.className = "met";
 					mDiv.innerHTML = `
-        <input type="text" value="${m.name}" onchange="practices[${pIdx}].metronomes[${mIdx}].name=this.value; save();" style="flex:1">
-        <input type="number" value="${m.startBPM}" style="width:50px" onchange="practices[${pIdx}].metronomes[${mIdx}].startBPM=parseInt(this.value); save();"> <small>BPM</small>
-        <input type="number" value="${m.duration}" style="width:50px" onchange="practices[${pIdx}].metronomes[${mIdx}].duration=parseInt(this.value); save();"> <small>Sec</small>
-        <button onclick="practices[${pIdx}].metronomes.splice(${mIdx},1); save(); render();">✕</button>
+        <input type="text" value="${m.name}" onchange="practices[${pIdx}].metronomes[${mIdx}].name=this.value; save();" style="flex:1; border:none; background:transparent;">
+        <input type="number" value="${m.startBPM}" style="width:50px" onchange="practices[${pIdx}].metronomes[${mIdx}].startBPM=parseInt(this.value); save();"> <span style="font-size:10px; color:#555;">BPM</span>
+        <input type="number" value="${m.duration}" style="width:50px" onchange="practices[${pIdx}].metronomes[${mIdx}].duration=parseInt(this.value); save();"> <span style="font-size:10px; color:#555;">SEC</span>
+        <button onclick="practices[${pIdx}].metronomes.splice(${mIdx},1); save(); render();" style="border:none; background:transparent; color:#444;">✕</button>
       `;
 					card.appendChild(mDiv);
 				});
+				const footer = document.createElement("div");
+				footer.style.display = "flex";
+				footer.style.gap = "10px";
+				footer.style.marginTop = "10px";
+
+				const playBtn = document.createElement("button");
+				playBtn.textContent = "START PRACTICE";
+				playBtn.style.flex = "1";
+				playBtn.style.background = "#0056b3";
+				playBtn.onclick = () => startPractice(p);
 
 				const addM = document.createElement("button");
 				addM.textContent = "+ Section";
@@ -330,28 +414,30 @@
 					render();
 				};
 
-				const playBtn = document.createElement("button");
-				playBtn.textContent = "▶ START";
-				playBtn.style.background = "#0056b3";
-				playBtn.style.marginLeft = "10px";
-				playBtn.onclick = () => startPractice(p);
-
-				card.append(addM, playBtn);
+				footer.append(addM, playBtn);
+				card.appendChild(footer);
 				app.appendChild(card);
 			});
 		}
 
-		const changeBPM = (delta) => {
-			currentBPM = Math.max(20, Math.min(300, currentBPM + delta));
-			updateBPMDisplay();
+		/* =====================
+		   INPUTS
+		===================== */
+		document.getElementById("playPause").onclick = togglePause;
+		document.getElementById("plus").onclick = () => {
+			currentBPM++;
+			updatePlayerUI();
 		};
-
-		document.getElementById("plus").onclick = () => changeBPM(1);
-		document.getElementById("minus").onclick = () => changeBPM(-1);
+		document.getElementById("minus").onclick = () => {
+			currentBPM = Math.max(20, currentBPM - 1);
+			updatePlayerUI();
+		};
+		document.getElementById("nextBtn").onclick = () => runSection(activeMetIndex + 1);
+		document.getElementById("prevBtn").onclick = () => runSection(activeMetIndex - 1);
 		document.getElementById("stop").onclick = stopEverything;
 		document.getElementById("addPracticeBtn").onclick = () => {
 			practices.push({
-				name: "Daily Routine",
+				name: "New Practice",
 				loop: false,
 				metronomes: [{
 					name: "Warmup",
@@ -365,8 +451,20 @@
 
 		window.addEventListener('keydown', (e) => {
 			if (document.getElementById("player").style.display === "flex") {
-				if (e.key === "ArrowUp") changeBPM(1);
-				if (e.key === "ArrowDown") changeBPM(-1);
+				if (e.key === " ") {
+					e.preventDefault();
+					togglePause();
+				}
+				if (e.key === "ArrowRight") runSection(activeMetIndex + 1);
+				if (e.key === "ArrowLeft") runSection(activeMetIndex - 1);
+				if (e.key === "ArrowUp") {
+					currentBPM++;
+					updatePlayerUI();
+				}
+				if (e.key === "ArrowDown") {
+					currentBPM = Math.max(20, currentBPM - 1);
+					updatePlayerUI();
+				}
 				if (e.key === "Escape") stopEverything();
 			}
 		});
