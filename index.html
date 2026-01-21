@@ -198,7 +198,6 @@
 			opacity: 1;
 		}
 
-		/* CUSTOM MODAL CSS */
 		#modal-overlay {
 			display: none;
 			position: fixed;
@@ -292,7 +291,7 @@
 				<button id="prevBtn" style="background:none; border:none; color:#666; cursor:pointer; font-weight: bold;">PREV</button>
 				<button id="nextBtn" style="background:none; border:none; color:#666; cursor:pointer; font-weight: bold;">NEXT</button>
 			</div>
-			<div id="upcoming-details" style="font-size: 13px; color: #444; text-align: center; margin-bottom: 20px;">--</div>
+			<div id="upcoming-details" style="font-size: 12px; color: #555; text-align: center; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.5px;">--</div>
 			<button id="stop" style="display:block; margin: 0 auto; background:none; border:none; color:#522; cursor:pointer; font-size: 12px; font-weight: bold;">EXIT ROUTINE</button>
 		</div>
 	</div>
@@ -435,8 +434,24 @@
 			if (activeMetIndex === -1) return;
 			document.getElementById("bpm-display").textContent = Math.round(currentBPM);
 			document.getElementById("label").textContent = activePractice.metronomes[activeMetIndex].name.toUpperCase();
+
+			// UPDATED LOGIC FOR "UP NEXT" DETAILS
 			const next = activePractice.metronomes[activeMetIndex + 1];
-			document.getElementById("upcoming-details").textContent = next ? `UPCOMING: ${next.name}` : "FINAL SECTION";
+			if (next) {
+				document.getElementById("upcoming-details").innerHTML =
+					`Up next: <span style="color:#888">${next.name}</span> &nbsp;•&nbsp; 
+                     <span style="color:#888">${next.startBPM} BPM</span> &nbsp;•&nbsp; 
+                     <span style="color:#888">${next.duration}s</span>`;
+			} else if (activePractice.loop) {
+				const first = activePractice.metronomes[0];
+				document.getElementById("upcoming-details").innerHTML =
+					`Up next (Loop): <span style="color:#888">${first.name}</span> &nbsp;•&nbsp; 
+                     <span style="color:#888">${first.startBPM} BPM</span> &nbsp;•&nbsp; 
+                     <span style="color:#888">${first.duration}s</span>`;
+			} else {
+				document.getElementById("upcoming-details").textContent = "FINAL SECTION";
+			}
+
 			activePractice.metronomes[activeMetIndex].startBPM = currentBPM;
 			save();
 		}
