@@ -12,7 +12,6 @@
 			--card: #151515;
 			--text: #eee;
 			--container-width: 450px;
-			/* Standardizing size for PC and Mobile */
 		}
 
 		body {
@@ -24,7 +23,6 @@
 			justify-content: center;
 		}
 
-		/* Responsive Container */
 		#builder,
 		#player {
 			width: 100%;
@@ -34,7 +32,6 @@
 			box-sizing: border-box;
 		}
 
-		/* BUILDER UI */
 		header {
 			display: flex;
 			justify-content: space-between;
@@ -48,6 +45,7 @@
 			margin-bottom: 20px;
 			border-radius: 16px;
 			background: var(--card);
+			position: relative;
 		}
 
 		.met {
@@ -71,13 +69,11 @@
 			font-size: 14px;
 		}
 
-		/* PLAYER UI */
 		#player {
 			display: none;
 			flex-direction: column;
 			align-items: center;
 			justify-content: center;
-			/* Centered instead of space-between */
 			gap: 25px;
 		}
 
@@ -176,7 +172,6 @@
 			margin-bottom: 15px;
 		}
 
-		/* BUTTON RESET */
 		button {
 			font-family: inherit;
 			transition: opacity 0.2s;
@@ -184,6 +179,19 @@
 
 		button:active {
 			opacity: 0.7;
+		}
+
+		.delete-routine {
+			background: none;
+			border: none;
+			color: #ff4444;
+			cursor: pointer;
+			font-size: 18px;
+			opacity: 0.5;
+		}
+
+		.delete-routine:hover {
+			opacity: 1;
 		}
 	</style>
 </head>
@@ -322,8 +330,10 @@
 
 		function runSection(index) {
 			if (!activePractice || index >= activePractice.metronomes.length) {
-				return activePractice?.loop ? runSection(0) : stopEverything();
+				if (activePractice?.loop) return runSection(0);
+				return stopEverything();
 			}
+			if (index < 0) index = 0;
 			activeMetIndex = index;
 			const met = activePractice.metronomes[index];
 			currentBPM = met.startBPM;
@@ -363,7 +373,6 @@
 			clearInterval(countdownInterval);
 			schedulerInterval = null;
 			document.getElementById("builder").style.display = "block";
-			document.getElementById("player").style.display = "flex"; // For layout reset
 			document.getElementById("player").style.display = "none";
 			render();
 		}
@@ -376,8 +385,11 @@
 				card.className = "practice";
 				card.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                <input type="text" value="${p.name}" onchange="practices[${pIdx}].name=this.value; save();" style="font-weight:bold; border:none; background:transparent; font-size:1.2rem; color:#007bff; width: 60%;">
-                <label style="font-size:10px; color:#666;">LOOP <input type="checkbox" ${p.loop ? 'checked' : ''} onchange="practices[${pIdx}].loop=this.checked; save();" style="width:auto;"></label>
+                <input type="text" value="${p.name}" onchange="practices[${pIdx}].name=this.value; save();" style="font-weight:bold; border:none; background:transparent; font-size:1.2rem; color:#007bff; width: 50%;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <label style="font-size:10px; color:#666;">LOOP <input type="checkbox" ${p.loop ? 'checked' : ''} onchange="practices[${pIdx}].loop=this.checked; save();" style="width:auto; vertical-align:middle;"></label>
+                    <button class="delete-routine" onclick="if(confirm('Delete entire routine?')){practices.splice(${pIdx},1); save(); render();}">🗑</button>
+                </div>
             </div>
         `;
 				p.metronomes.forEach((m, mIdx) => {
@@ -446,9 +458,10 @@
 		document.getElementById("nextBtn").onclick = () => runSection(activeMetIndex + 1);
 		document.getElementById("prevBtn").onclick = () => runSection(activeMetIndex - 1);
 		document.getElementById("stop").onclick = stopEverything;
+
 		document.getElementById("addPracticeBtn").onclick = () => {
 			practices.push({
-				name: "Daily Routine",
+				name: "New Routine",
 				loop: false,
 				metronomes: [{
 					name: "Warmup",
@@ -459,6 +472,7 @@
 			save();
 			render();
 		};
+
 		render();
 	</script>
 </body>
