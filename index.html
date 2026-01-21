@@ -48,25 +48,32 @@
 			position: relative;
 		}
 
+		/* FIXED GRID FOR RESPONSIVENESS */
 		.met {
 			border-left: 4px solid var(--primary);
-			padding: 12px;
+			padding: 12px 8px;
 			margin: 12px 0;
 			background: #1c1c1c;
 			display: grid;
-			grid-template-columns: 1fr 60px 60px 30px;
-			gap: 10px;
+			/* Using fractions (fr) so they scale, and min-width 0 to prevent overflow */
+			grid-template-columns: 2fr 1fr 1fr 30px;
+			gap: 8px;
 			align-items: center;
 			border-radius: 4px;
+			overflow: hidden;
 		}
 
 		input {
 			background: #222;
 			color: #fff;
 			border: 1px solid #444;
-			padding: 10px;
+			padding: 10px 5px;
 			border-radius: 8px;
-			font-size: 14px;
+			font-size: 13px;
+			width: 100%;
+			box-sizing: border-box;
+			min-width: 0;
+			/* Critical for grid shrinking */
 		}
 
 		#player {
@@ -385,9 +392,9 @@
 				card.className = "practice";
 				card.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                <input type="text" value="${p.name}" onchange="practices[${pIdx}].name=this.value; save();" style="font-weight:bold; border:none; background:transparent; font-size:1.2rem; color:#007bff; width: 50%;">
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <label style="font-size:10px; color:#666;">LOOP <input type="checkbox" ${p.loop ? 'checked' : ''} onchange="practices[${pIdx}].loop=this.checked; save();" style="width:auto; vertical-align:middle;"></label>
+                <input type="text" value="${p.name}" onchange="practices[${pIdx}].name=this.value; save();" style="font-weight:bold; border:none; background:transparent; font-size:1.1rem; color:#007bff; width: 50%;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <label style="font-size:9px; color:#666; white-space:nowrap;">LOOP <input type="checkbox" ${p.loop ? 'checked' : ''} onchange="practices[${pIdx}].loop=this.checked; save();" style="width:auto; vertical-align:middle;"></label>
                     <button class="delete-routine" onclick="if(confirm('Delete entire routine?')){practices.splice(${pIdx},1); save(); render();}">🗑</button>
                 </div>
             </div>
@@ -396,10 +403,10 @@
 					const mDiv = document.createElement("div");
 					mDiv.className = "met";
 					mDiv.innerHTML = `
-                <input type="text" value="${m.name}" onchange="practices[${pIdx}].metronomes[${mIdx}].name=this.value; save();">
-                <input type="number" value="${m.startBPM}" onchange="practices[${pIdx}].metronomes[${mIdx}].startBPM=parseInt(this.value); save();">
-                <input type="number" value="${m.duration}" onchange="practices[${pIdx}].metronomes[${mIdx}].duration=parseInt(this.value); save();">
-                <button onclick="practices[${pIdx}].metronomes.splice(${mIdx},1); save(); render();" style="background:none; border:none; color:#555; cursor:pointer;">✕</button>
+                <input type="text" value="${m.name}" placeholder="Name" onchange="practices[${pIdx}].metronomes[${mIdx}].name=this.value; save();">
+                <input type="number" value="${m.startBPM}" placeholder="BPM" onchange="practices[${pIdx}].metronomes[${mIdx}].startBPM=parseInt(this.value); save();">
+                <input type="number" value="${m.duration}" placeholder="Secs" onchange="practices[${pIdx}].metronomes[${mIdx}].duration=parseInt(this.value); save();">
+                <button onclick="practices[${pIdx}].metronomes.splice(${mIdx},1); save(); render();" style="background:none; border:none; color:#777; cursor:pointer; font-weight:bold; font-size:16px;">✕</button>
             `;
 					card.appendChild(mDiv);
 				});
