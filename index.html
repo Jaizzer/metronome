@@ -21,6 +21,9 @@
 			font-family: system-ui, -apple-system, sans-serif;
 			display: flex;
 			justify-content: center;
+			overflow-x: hidden;
+			/* Prevents weird horizontal shifts on iOS */
+			-webkit-tap-highlight-color: transparent;
 		}
 
 		#builder,
@@ -37,6 +40,15 @@
 			justify-content: space-between;
 			align-items: center;
 			margin-bottom: 30px;
+			position: relative;
+			z-index: 10;
+		}
+
+		/* Forces iOS to recognize this as an interactive element */
+		#addPracticeBtn {
+			cursor: pointer;
+			touch-action: manipulation;
+			-webkit-appearance: none;
 		}
 
 		.practice {
@@ -95,6 +107,7 @@
 			position: relative;
 			cursor: ns-resize;
 			touch-action: none;
+			user-select: none;
 		}
 
 		.knob {
@@ -105,6 +118,7 @@
 			border: 5px solid #333;
 			position: relative;
 			box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+			pointer-events: none;
 		}
 
 		.knob-indicator {
@@ -179,6 +193,7 @@
 		button {
 			font-family: inherit;
 			transition: opacity 0.2s;
+			cursor: pointer;
 		}
 
 		button:active {
@@ -350,9 +365,26 @@
 		knobContainer.onmousedown = (e) => startDrag(e.clientY);
 		window.onmousemove = (e) => moveDrag(e.clientY);
 		window.onmouseup = () => isDragging = false;
-		knobContainer.ontouchstart = (e) => startDrag(e.touches[0].clientY);
-		window.ontouchmove = (e) => moveDrag(e.touches[0].clientY);
-		window.ontouchend = () => isDragging = false;
+
+		knobContainer.addEventListener('touchstart', (e) => {
+			startDrag(e.touches[0].clientY);
+			e.preventDefault();
+		}, {
+			passive: false
+		});
+
+		window.addEventListener('touchmove', (e) => {
+			if (isDragging) {
+				moveDrag(e.touches[0].clientY);
+				e.preventDefault();
+			}
+		}, {
+			passive: false
+		});
+
+		window.addEventListener('touchend', () => {
+			isDragging = false;
+		});
 
 		function adjustBPM(amount) {
 			currentBPM = Math.max(20, Math.min(300, currentBPM + amount));
@@ -435,7 +467,6 @@
 			document.getElementById("bpm-display").textContent = Math.round(currentBPM);
 			document.getElementById("label").textContent = activePractice.metronomes[activeMetIndex].name.toUpperCase();
 
-			// UPDATED LOGIC FOR "UP NEXT" DETAILS
 			const next = activePractice.metronomes[activeMetIndex + 1];
 			if (next) {
 				document.getElementById("upcoming-details").innerHTML =
@@ -527,17 +558,8 @@
 			});
 		}
 
-		document.getElementById("playPause").onclick = () => {
-			isPaused = !isPaused;
-			document.getElementById("playPause").textContent = isPaused ? "▶" : "II";
-		};
-		document.getElementById("plus").onclick = () => adjustBPM(1);
-		document.getElementById("minus").onclick = () => adjustBPM(-1);
-		document.getElementById("nextBtn").onclick = () => runSection(activeMetIndex + 1);
-		document.getElementById("prevBtn").onclick = () => runSection(activeMetIndex - 1);
-		document.getElementById("stop").onclick = stopEverything;
-
-		document.getElementById("addPracticeBtn").onclick = () => {
+		/* MOBILE FIX FOR ADD BUTTON */
+		const addPracticeAction = () => {
 			practices.push({
 				name: "New Routine",
 				loop: false,
@@ -550,6 +572,25 @@
 			save();
 			render();
 		};
+
+		const addBtn = document.getElementById("addPracticeBtn");
+		addBtn.addEventListener('touchend', (e) => {
+			e.preventDefault();
+			addPracticeAction();
+		});
+		addBtn.addEventListener('click', (e) => {
+			addPracticeAction();
+		});
+
+		document.getElementById("playPause").onclick = () => {
+			isPaused = !isPaused;
+			document.getElementById("playPause").textContent = isPaused ? "▶" : "II";
+		};
+		document.getElementById("plus").onclick = () => adjustBPM(1);
+		document.getElementById("minus").onclick = () => adjustBPM(-1);
+		document.getElementById("nextBtn").onclick = () => runSection(activeMetIndex + 1);
+		document.getElementById("prevBtn").onclick = () => runSection(activeMetIndex - 1);
+		document.getElementById("stop").onclick = stopEverything;
 
 		render();
 	</script>
