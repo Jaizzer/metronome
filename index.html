@@ -22,7 +22,6 @@
 			display: flex;
 			justify-content: center;
 			overflow-x: hidden;
-			/* Prevents weird horizontal shifts on iOS */
 			-webkit-tap-highlight-color: transparent;
 		}
 
@@ -44,7 +43,6 @@
 			z-index: 10;
 		}
 
-		/* Forces iOS to recognize this as an interactive element */
 		#addPracticeBtn {
 			cursor: pointer;
 			touch-action: manipulation;
@@ -324,7 +322,6 @@
 			isPaused = false,
 			timeLeftInSection = 0;
 
-		/* MODAL LOGIC */
 		let pendingDeleteIndex = null;
 
 		function openDeleteModal(index) {
@@ -345,7 +342,6 @@
 			closeModal();
 		};
 
-		/* KNOB LOGIC */
 		const knob = document.getElementById('knob');
 		const knobContainer = document.getElementById('knobContainer');
 		let isDragging = false,
@@ -398,16 +394,25 @@
 			if (audioCtx.state === 'suspended') audioCtx.resume();
 		}
 
+		/* MODIFIED FOR HIGHER VOLUME AND PUNCHIER SOUND */
 		function playClick(time, accented, currentBeat) {
 			const osc = audioCtx.createOscillator();
 			const gain = audioCtx.createGain();
+
+			// Triangle waves are much more audible than default sine waves
+			osc.type = 'triangle';
 			osc.frequency.setValueAtTime(accented ? 1600 : 900, time);
-			gain.gain.setValueAtTime(0.3, time);
-			gain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+
+			// Increased volume from 0.3 to 0.8
+			gain.gain.setValueAtTime(0.8, time);
+			gain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+
 			osc.connect(gain);
 			gain.connect(audioCtx.destination);
+
 			osc.start(time);
-			osc.stop(time + 0.05);
+			osc.stop(time + 0.1);
+
 			setTimeout(() => {
 				if (!isPaused) lightUpDot(currentBeat);
 			}, (time - audioCtx.currentTime) * 1000);
@@ -558,7 +563,6 @@
 			});
 		}
 
-		/* MOBILE FIX FOR ADD BUTTON */
 		const addPracticeAction = () => {
 			practices.push({
 				name: "New Routine",
