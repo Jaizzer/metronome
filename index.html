@@ -530,10 +530,10 @@
 		}
 
 		function adjustBPM(amount) {
-			currentBPM = Math.max(20, Math.min(300, currentBPM + amount));
+			currentBPM = Math.round(Math.max(20, Math.min(300, currentBPM + amount)));
 			const rotation = ((currentBPM - 20) / (300 - 20) * 300) - 150;
 			document.getElementById('knob').style.transform = `rotate(${rotation}deg)`;
-			document.getElementById("bpm-display").textContent = Math.round(currentBPM);
+			document.getElementById("bpm-display").textContent = currentBPM;
 		}
 
 		function updatePlayerUI() {
@@ -572,14 +572,24 @@
 					mDiv.className = "met";
 					mDiv.innerHTML = `
                         <input type="text" value="${m.name}" onchange="practices[${pIdx}].metronomes[${mIdx}].name=this.value;save();">
-                        <input type="number" value="${m.startBPM}" onchange="practices[${pIdx}].metronomes[${mIdx}].startBPM=parseInt(this.value);save();">
-                        <input type="number" value="${m.duration}" onchange="practices[${pIdx}].metronomes[${mIdx}].duration=parseInt(this.value);save();">
+                        <input type="number" value="${m.startBPM}" min="20" max="300" step="1" onchange="practices[${pIdx}].metronomes[${mIdx}].startBPM=parseInt(this.value);save();">
+                        <input type="number" value="${m.duration}" min="1" step="1" onchange="practices[${pIdx}].metronomes[${mIdx}].duration=parseInt(this.value);save();">
                         <button onclick="practices[${pIdx}].metronomes.splice(${mIdx},1);save();render();" style="border:none;background:none;color:#444">✕</button>`;
 					card.appendChild(mDiv);
 				});
+				const addSectionBtn = document.createElement("button");
+				addSectionBtn.textContent = "+ ADD SECTION";
+				addSectionBtn.style.cssText = "width:100%;padding:10px;margin-top:10px;border-radius:12px;background:none;color:#555;border:1px dashed #333;font-weight:900;letter-spacing:1px;font-size:11px";
+				addSectionBtn.onclick = () => {
+					practices[pIdx].metronomes.push({ name: "Exercise", startBPM: 100, duration: 60 });
+					save();
+					render();
+				};
+				card.appendChild(addSectionBtn);
+
 				const startBtn = document.createElement("button");
 				startBtn.textContent = "START ROUTINE";
-				startBtn.style.cssText = "width:100%;padding:14px;margin-top:15px;border-radius:12px;background:var(--primary);color:white;border:none;font-weight:900;letter-spacing:1px;font-size:12px";
+				startBtn.style.cssText = "width:100%;padding:14px;margin-top:10px;border-radius:12px;background:var(--primary);color:white;border:none;font-weight:900;letter-spacing:1px;font-size:12px";
 				startBtn.onclick = () => {
 					document.getElementById("builder").style.display = "none";
 					document.getElementById("player").style.display = "flex";
