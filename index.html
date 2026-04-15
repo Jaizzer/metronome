@@ -494,7 +494,7 @@
 		<!-- Volume control -->
 		<div id="volume-wrap">
 			<span>VOL</span>
-			<input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="0.8">
+			<input type="range" id="volumeSlider" min="0" max="3" step="0.01" value="0.8">
 			<span id="volume-pct">80%</span>
 		</div>
 
@@ -545,7 +545,7 @@
 			// Restore volume slider
 			const slider = document.getElementById('volumeSlider');
 			slider.value = metVolume;
-			document.getElementById('volume-pct').textContent = Math.round(metVolume * 100) + '%';
+			document.getElementById('volume-pct').textContent = Math.round((metVolume / 3) * 100) + '%';
 		}
 
 		function updateMasteryUI() {
@@ -596,7 +596,7 @@
 		// Volume slider
 		document.getElementById('volumeSlider').oninput = (e) => {
 			metVolume = parseFloat(e.target.value);
-			document.getElementById('volume-pct').textContent = Math.round(metVolume * 100) + '%';
+			document.getElementById('volume-pct').textContent = Math.round((metVolume / 3) * 100) + '%';
 			save();
 		};
 
