@@ -153,7 +153,7 @@
 
 		.drag-handle:active { cursor: grabbing; }
 
-		/* Name field — locked by default, unlocked on long-press */
+		/* Name field — locked by default, unlocked on click */
 		.met-name {
 			background: #222;
 			color: #fff;
@@ -163,14 +163,12 @@
 			font-size: 13px;
 			width: 100%;
 			box-sizing: border-box;
-			pointer-events: none;
 			user-select: none;
-			cursor: default;
+			cursor: pointer;
 			transition: border-color 0.2s;
 		}
 
 		.met-name.unlocked {
-			pointer-events: auto;
 			user-select: text;
 			cursor: text;
 			border-color: var(--primary);
@@ -812,18 +810,13 @@
 			render();
 		}
 
-		// ── Long-press to unlock name field ───────────────────────────────────
-		let longPressTimer = null;
-
-		function startLongPress(e, nameInput) {
-			longPressTimer = setTimeout(() => {
-				nameInput.classList.add('unlocked');
+		// ── Click to unlock/lock name field ───────────────────────────────────
+		function toggleNameEdit(nameInput) {
+			nameInput.classList.toggle('unlocked');
+			if (nameInput.classList.contains('unlocked')) {
 				nameInput.focus();
-			}, 500);
-		}
-
-		function cancelLongPress() {
-			clearTimeout(longPressTimer);
+				nameInput.select();
+			}
 		}
 
 		function render() {
@@ -879,13 +872,12 @@
 					const handle = mDiv.querySelector('.drag-handle');
 					handle.addEventListener('touchstart', (e) => onTouchDragStart(e, pIdx, mIdx), { passive: false });
 
-					// Long-press to unlock name
+					// Click to toggle name edit
 					const nameInput = mDiv.querySelector('.met-name');
-					nameInput.addEventListener('mousedown', (e) => startLongPress(e, nameInput));
-					nameInput.addEventListener('touchstart', (e) => startLongPress(e, nameInput), { passive: true });
-					nameInput.addEventListener('mouseup', cancelLongPress);
-					nameInput.addEventListener('touchend', cancelLongPress);
-					nameInput.addEventListener('mouseleave', cancelLongPress);
+					nameInput.addEventListener('click', (e) => {
+						e.stopPropagation();
+						toggleNameEdit(nameInput);
+					});
 
 					card.appendChild(mDiv);
 				});
