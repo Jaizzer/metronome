@@ -109,7 +109,6 @@
 			position: relative;
 		}
 
-		/* Met row: drag handle | name | bpm | dur | ramp | remove */
 		.met {
 			border-left: 4px solid var(--primary);
 			padding: 10px 8px;
@@ -118,9 +117,19 @@
 			border-radius: 4px;
 		}
 
+		/* Row 1: name + remove */
+		.met-name-row {
+			display: grid;
+			grid-template-columns: 22px 1fr 30px;
+			gap: 6px;
+			align-items: center;
+			margin-bottom: 6px;
+		}
+
+		/* Row 2: bpm + duration + ramp toggle */
 		.met-row {
 			display: grid;
-			grid-template-columns: 22px 2fr 1fr 1fr 30px;
+			grid-template-columns: 22px 1fr 1fr 60px;
 			gap: 6px;
 			align-items: center;
 		}
@@ -826,6 +835,36 @@
 			return `${s}s`;
 		}
 
+		// ── iOS-style drum-roll time picker ───────────────────────────────────
+		const ITEM_H = 40;
+
+		function buildDrum(id, count, selected, label) {
+			return `
+				<div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+					<div style="font-size:9px;color:#555;font-weight:800;letter-spacing:1px;text-transform:uppercase;">${label}</div>
+					<div style="position:relative;height:${ITEM_H * 3}px;overflow:hidden;width:64px;">
+						<div style="position:absolute;top:${ITEM_H}px;left:0;right:0;height:${ITEM_H}px;border-top:1px solid #333;border-bottom:1px solid #333;pointer-events:none;z-index:2;"></div>
+						<div id="${id}" style="position:absolute;top:0;left:0;right:0;overflow-y:scroll;height:${ITEM_H * 3}px;scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;">
+							<div style="height:${ITEM_H}px;"></div>
+							${Array.from({length: count}, (_, i) => `
+								<div style="height:${ITEM_H}px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;scroll-snap-align:center;color:#eee;">${String(i).padStart(2,'0')}</div>
+							`).join('')}
+							<div style="height:${ITEM_H}px;"></div>
+						</div>
+					</div>
+				</div>`;
+		}
+
+		function drumScrollTo(id, value) {
+			const el = document.getElementById(id);
+			el.scrollTop = value * ITEM_H;
+		}
+
+		function drumValue(id) {
+			const el = document.getElementById(id);
+			return Math.round(el.scrollTop / ITEM_H);
+		}
+
 		function openTimePicker(pIdx, mIdx, currentSeconds) {
 			const h = Math.floor(currentSeconds / 3600);
 			const m = Math.floor((currentSeconds % 3600) / 60);
@@ -833,26 +872,23 @@
 
 			document.getElementById('modal-title').textContent = 'Set Duration';
 			document.getElementById('modal-content').innerHTML = `
-				<div style="display: flex; gap: 10px; justify-content: center; margin: 20px 0;">
-					<div style="text-align: center;">
-						<label style="display: block; font-size: 10px; color: #555; margin-bottom: 5px; text-transform: uppercase; font-weight: 800;">Hours</label>
-						<input type="number" id="time-h" value="${h}" min="0" max="23" style="width: 50px; padding: 8px; font-size: 16px; text-align: center;">
-					</div>
-					<div style="text-align: center;">
-						<label style="display: block; font-size: 10px; color: #555; margin-bottom: 5px; text-transform: uppercase; font-weight: 800;">Minutes</label>
-						<input type="number" id="time-m" value="${m}" min="0" max="59" style="width: 50px; padding: 8px; font-size: 16px; text-align: center;">
-					</div>
-					<div style="text-align: center;">
-						<label style="display: block; font-size: 10px; color: #555; margin-bottom: 5px; text-transform: uppercase; font-weight: 800;">Seconds</label>
-						<input type="number" id="time-s" value="${s}" min="0" max="59" style="width: 50px; padding: 8px; font-size: 16px; text-align: center;">
-					</div>
+				<div style="display:flex;gap:12px;justify-content:center;margin:16px 0;">
+					${buildDrum('drum-h', 24, h, 'hrs')}
+					${buildDrum('drum-m', 60, m, 'min')}
+					${buildDrum('drum-s', 60, s, 'sec')}
 				</div>
-				<div style="display:flex; gap:10px; margin-top:20px;">
-					<button onclick="closeTimePicker()" style="flex:1; padding:12px; background:#333; color:#fff; border:none; border-radius:8px;">CANCEL</button>
-					<button onclick="saveTimePicker(${pIdx}, ${mIdx})" style="flex:1; padding:12px; background:var(--primary); color:#fff; border:none; border-radius:8px;">OK</button>
+				<div style="display:flex;gap:10px;margin-top:16px;">
+					<button onclick="closeTimePicker()" style="flex:1;padding:12px;background:#333;color:#fff;border:none;border-radius:8px;">CANCEL</button>
+					<button onclick="saveTimePicker(${pIdx},${mIdx})" style="flex:1;padding:12px;background:var(--primary);color:#fff;border:none;border-radius:8px;">OK</button>
 				</div>
 			`;
 			document.getElementById('modal-overlay').style.display = 'flex';
+			// scroll after DOM is painted
+			requestAnimationFrame(() => {
+				drumScrollTo('drum-h', h);
+				drumScrollTo('drum-m', m);
+				drumScrollTo('drum-s', s);
+			});
 		}
 
 		function closeTimePicker() {
@@ -860,9 +896,9 @@
 		}
 
 		function saveTimePicker(pIdx, mIdx) {
-			const h = parseInt(document.getElementById('time-h').value) || 0;
-			const m = parseInt(document.getElementById('time-m').value) || 0;
-			const s = parseInt(document.getElementById('time-s').value) || 0;
+			const h = drumValue('drum-h');
+			const m = drumValue('drum-m');
+			const s = drumValue('drum-s');
 			const totalSeconds = h * 3600 + m * 60 + s;
 			practices[pIdx].metronomes[mIdx].duration = Math.max(1, totalSeconds);
 			save();
@@ -902,17 +938,16 @@
 					const rampVisible = m.ramp ? 'visible' : '';
 
 					mDiv.innerHTML = `
-						<div class="met-row">
-							<span class="drag-handle" title="Hold to drag">⠿</span>
+						<div class="met-name-row">
+							<span class="drag-handle" title="Drag to reorder">⠿</span>
 							<input class="met-name" type="text" value="${m.name}" onchange="practices[${pIdx}].metronomes[${mIdx}].name=this.value;save();" onblur="this.classList.remove('unlocked')">
-							<input type="number" value="${m.startBPM}" min="20" max="300" step="1" placeholder="BPM" onchange="practices[${pIdx}].metronomes[${mIdx}].startBPM=parseInt(this.value);save();">
-							<input type="text" value="${formatDuration(m.duration)}" readonly style="cursor:pointer;" onclick="openTimePicker(${pIdx}, ${mIdx}, ${m.duration});">
 							<button onclick="practices[${pIdx}].metronomes.splice(${mIdx},1);save();render();" style="border:none;background:none;color:#444">✕</button>
 						</div>
-						<div class="met-row" style="margin-top:6px;">
+						<div class="met-row">
 							<span></span>
+							<input type="number" value="${m.startBPM}" min="20" max="300" step="1" placeholder="BPM" onchange="practices[${pIdx}].metronomes[${mIdx}].startBPM=parseInt(this.value);save();">
+							<input type="text" value="${formatDuration(m.duration)}" readonly style="cursor:pointer;text-align:center;" onclick="openTimePicker(${pIdx}, ${mIdx}, ${m.duration});">
 							<button class="ramp-toggle ${rampActive}" onclick="practices[${pIdx}].metronomes[${mIdx}].ramp=!practices[${pIdx}].metronomes[${mIdx}].ramp;save();render();">RAMP ${m.ramp ? 'ON' : 'OFF'}</button>
-							<span></span><span></span><span></span>
 						</div>
 						<div class="met-ramp-row ${rampVisible}" id="ramp-row-${pIdx}-${mIdx}">
 							<span>End BPM</span>
