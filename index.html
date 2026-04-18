@@ -525,16 +525,21 @@
 	</div>
 
 	<script>
-		let practices = JSON.parse(localStorage.getItem("practices") || "[]");
+		window.practices = JSON.parse(localStorage.getItem("practices") || "[]");
 		let counts = JSON.parse(localStorage.getItem("masteryCounts") || '{"s":0, "f":0}');
 		let showStats = localStorage.getItem("showStats") !== "false";
 		let metVolume = parseFloat(localStorage.getItem("metVolume") || "0.8");
 
-		const save = () => {
-			localStorage.setItem("practices", JSON.stringify(practices));
-			localStorage.setItem("masteryCounts", JSON.stringify(counts));
-			localStorage.setItem("showStats", showStats);
-			localStorage.setItem("metVolume", metVolume);
+		window.save = function () {
+			try {
+				localStorage.setItem("practices", JSON.stringify(window.practices));
+				localStorage.setItem("masteryCounts", JSON.stringify(counts));
+				localStorage.setItem("showStats", showStats);
+				localStorage.setItem("metVolume", metVolume);
+			} catch (e) {
+				console.error("save failed:", e);
+				alert("Could not save: " + e.message);
+			}
 		};
 
 		let audioCtx, nextTickTime = 0, schedulerInterval, countdownInterval;
