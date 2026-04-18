@@ -712,6 +712,12 @@
 			// If ramping, adjusting manually disables ramp for this section
 			isRamping = false;
 			adjustBPMDisplay();
+			// Persist the manual change back to the active section
+			if (activePractice && activeMetIndex >= 0) {
+				activePractice.metronomes[activeMetIndex].startBPM = currentBPM;
+				activePractice.metronomes[activeMetIndex].ramp = false;
+				window.save();
+			}
 		}
 
 		function updatePlayerUI() {
