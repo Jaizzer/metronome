@@ -585,6 +585,38 @@
 			updateMasteryUI();
 		};
 
+		// Foot pedal (Enter key) with 1-second window for consecutive detection
+		let lastPedalPressTime = 0;
+		let pendingSuccessTimeout = null;
+		window.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') {
+				const now = Date.now();
+				const timeSinceLastPress = now - lastPedalPressTime;
+
+				if (timeSinceLastPress < 1000) {
+					// Consecutive press within 1 second = fail
+					clearTimeout(pendingSuccessTimeout);
+					counts.f++;
+					flashZone('fail-zone', 'fail-flash');
+					lastPedalPressTime = now;
+					save();
+					updateMasteryUI();
+				} else {
+					// New press: wait 1 second before counting as success
+					lastPedalPressTime = now;
+					clearTimeout(pendingSuccessTimeout);
+					pendingSuccessTimeout = setTimeout(() => {
+						counts.s++;
+						flashZone('success-zone', 'success-flash');
+						save();
+						updateMasteryUI();
+					}, 1000);
+				}
+
+				e.preventDefault();
+			}
+		});
+
 		function flashZone(id, cls) {
 			const el = document.getElementById(id);
 			el.classList.add(cls);
