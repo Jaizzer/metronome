@@ -1,14 +1,29 @@
 // ============================================================
 // db.js — all communication with Neon goes through this file.
 // Nothing else in the app should know about @neondatabase/neon-js.
+//
+// We use SupabaseAuthAdapter rather than the native API because the
+// native client.auth doesn't expose onAuthStateChange — only the
+// Supabase-compatible adapter does, and main.js needs that to detect
+// sign-in/out. Source: github.com/neondatabase/neon-js packages/neon-js
+// README (still beta as of writing — re-check that README on upgrade).
 // ============================================================
-import { NeonClient } from '@neondatabase/neon-js';
+import { createClient, SupabaseAuthAdapter } from '@neondatabase/neon-js';
 
 // Set in .env (see .env.example). Vite exposes VITE_-prefixed vars
 // on import.meta.env at build time.
+const AUTH_URL = import.meta.env.VITE_NEON_AUTH_URL;
 const DATA_API_URL = import.meta.env.VITE_NEON_DATA_API_URL;
 
-export const client = new NeonClient({ dataApiUrl: DATA_API_URL });
+export const client = createClient({
+	auth: {
+		adapter: SupabaseAuthAdapter(),
+		url: AUTH_URL,
+	},
+	dataApi: {
+		url: DATA_API_URL,
+	},
+});
 
 // ---------- Auth ----------
 
