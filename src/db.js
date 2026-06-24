@@ -43,6 +43,23 @@ export async function signOut() {
 	await client.auth.signOut();
 }
 
+// Verifies the OTP code Neon Auth emails after sign-up. On success this
+// may auto-sign-in the user (data.session present) or just mark the email
+// verified, depending on Neon's project config — main.js checks for a
+// session and routes accordingly either way.
+export async function verifyEmail(email, otp) {
+	const { data, error } = await client.auth.emailOtp.verifyEmail({ email, otp });
+	if (error) throw error;
+	return data;
+}
+
+// Re-sends the sign-up verification code, in case the first one expired
+// (Neon's codes expire after 10 minutes) or never arrived.
+export async function resendVerification(email) {
+	const { error } = await client.auth.sendVerificationEmail({ email });
+	if (error) throw error;
+}
+
 export async function getSession() {
 	const { data } = await client.auth.getSession();
 	return data?.session ?? null;

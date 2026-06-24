@@ -30,6 +30,7 @@
 		}
 
 		#auth,
+		#verify,
 		#builder,
 		#player {
 			width: 100%;
@@ -40,7 +41,8 @@
 			position: relative;
 		}
 
-		#auth {
+		#auth,
+		#verify {
 			display: flex;
 			flex-direction: column;
 			align-items: center;
@@ -49,23 +51,27 @@
 			text-align: center;
 		}
 
-		#auth h1 {
+		#auth h1,
+		#verify h1 {
 			letter-spacing: -1px;
 			margin-bottom: 0;
 		}
 
-		#auth p {
+		#auth p,
+		#verify p {
 			color: #555;
 			font-size: 13px;
 			max-width: 320px;
 			line-height: 1.5;
 		}
 
-		#auth input {
+		#auth input,
+		#verify input {
 			max-width: 280px;
 		}
 
-		#auth-error {
+		#auth-error,
+		#verify-error {
 			color: var(--fail-text);
 			font-size: 12px;
 			min-height: 16px;
@@ -549,6 +555,17 @@
 		<button id="auth-submit" class="auth-btn">SIGN IN</button>
 		<button id="auth-toggle" class="auth-link">Need an account? Sign up</button>
 		<div id="auth-status"></div>
+	</div>
+
+	<!-- ───────────── Email verification screen ───────────── -->
+	<div id="verify" style="display:none">
+		<h1>METRONOME</h1>
+		<p id="verify-instructions">Enter the code we just emailed you to finish creating your account.</p>
+		<input id="verify-code" type="text" inputmode="numeric" placeholder="6-digit code" autocomplete="one-time-code">
+		<div id="verify-error"></div>
+		<button id="verify-submit" class="auth-btn">VERIFY</button>
+		<button id="verify-resend" class="auth-link">Resend code</button>
+		<button id="verify-back" class="auth-link">Back to sign in</button>
 	</div>
 
 	<div id="builder" style="display:none">

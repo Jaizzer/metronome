@@ -9,6 +9,8 @@ import {
 	signOut,
 	getSession,
 	onAuthChange,
+	verifyEmail,
+	resendVerification,
 	fetchPractices,
 	insertPractice,
 	updatePractice,
@@ -86,9 +88,38 @@ function saveSettings() {
 // ---------------- Auth flow ----------------
 
 let authMode = 'signin'; // or "signup"
+let pendingVerifyEmail = null; // set when we route to the verify screen
 
 function showAuthError(msg) {
 	document.getElementById('auth-error').textContent = msg || '';
+}
+
+function showVerifyError(msg) {
+	document.getElementById('verify-error').textContent = msg || '';
+}
+
+function showAuthScreen() {
+	document.getElementById('verify').style.display = 'none';
+	document.getElementById('auth').style.display = 'flex';
+}
+
+function showVerifyScreen(email, instructions) {
+	pendingVerifyEmail = email;
+	document.getElementById('verify-instructions').textContent =
+		instructions || `Enter the code we emailed to ${email}.`;
+	document.getElementById('verify-code').value = '';
+	showVerifyError('');
+	document.getElementById('auth').style.display = 'none';
+	document.getElementById('verify').style.display = 'flex';
+}
+
+// Neon Auth returns a distinct error for "you signed up but haven't
+// verified your email yet" rather than a generic auth failure — we route
+// to the verify screen instead of just showing the raw error text.
+function isUnverifiedEmailError(e) {
+	const msg = (e?.message || '').toLowerCase();
+	const code = (e?.code || '').toLowerCase();
+	return msg.includes('verif') || code.includes('verif') || code.includes('email_not_verified');
 }
 
 document.getElementById('auth-toggle').onclick = () => {
@@ -110,16 +141,69 @@ document.getElementById('auth-submit').onclick = async () => {
 	try {
 		if (authMode === 'signup') {
 			await signUp(email, password);
-			document.getElementById('auth-status').textContent =
-				'Check your email to confirm, then sign in.';
+			document.getElementById('auth-status').textContent = '';
+			showVerifyScreen(
+				email,
+				`We emailed a code to ${email}. Enter it below to finish creating your account.`,
+			);
 		} else {
 			await signIn(email, password);
-			// onAuthChange fires and boots the app
+			// onAuthChange fires and boots the app, unless email isn't verified yet
 		}
 	} catch (e) {
-		showAuthError(e.message || 'Something went wrong.');
-		document.getElementById('auth-status').textContent = '';
+		if (isUnverifiedEmailError(e)) {
+			document.getElementById('auth-status').textContent = '';
+			showVerifyScreen(
+				email,
+				`Your email isn't verified yet. Enter the code we sent to ${email}, or resend a new one.`,
+			);
+		} else {
+			showAuthError(e.message || 'Something went wrong.');
+			document.getElementById('auth-status').textContent = '';
+		}
 	}
+};
+
+document.getElementById('verify-submit').onclick = async () => {
+	const code = document.getElementById('verify-code').value.trim();
+	if (!code) return showVerifyError('Enter the code from your email.');
+	if (!pendingVerifyEmail)
+		return showVerifyError('Something went wrong — go back and sign in again.');
+
+	showVerifyError('');
+	try {
+		const data = await verifyEmail(pendingVerifyEmail, code);
+		if (data?.session) {
+			// Verification auto-signed us in; onAuthChange will boot the app.
+			return;
+		}
+		// Verified but not auto-signed-in: send them to sign in normally.
+		authMode = 'signin';
+		document.getElementById('auth-submit').textContent = 'SIGN IN';
+		document.getElementById('auth-toggle').textContent = 'Need an account? Sign up';
+		document.getElementById('auth-email').value = pendingVerifyEmail;
+		showAuthScreen();
+		document.getElementById('auth-status').textContent =
+			'Email verified — sign in to continue.';
+	} catch (e) {
+		showVerifyError(e.message || "That code didn't work. Check it and try again.");
+	}
+};
+
+document.getElementById('verify-resend').onclick = async () => {
+	if (!pendingVerifyEmail) return;
+	showVerifyError('');
+	try {
+		await resendVerification(pendingVerifyEmail);
+		showVerifyError('New code sent. Check your email.');
+	} catch (e) {
+		showVerifyError(e.message || "Couldn't resend the code. Try again shortly.");
+	}
+};
+
+document.getElementById('verify-back').onclick = () => {
+	pendingVerifyEmail = null;
+	showAuthScreen();
 };
 
 document.getElementById('signOutBtn').onclick = async () => {
@@ -130,6 +214,7 @@ document.getElementById('signOutBtn').onclick = async () => {
 async function bootApp(session) {
 	currentSession = session;
 	document.getElementById('auth').style.display = 'none';
+	document.getElementById('verify').style.display = 'none';
 	document.getElementById('builder').style.display = 'block';
 
 	try {
