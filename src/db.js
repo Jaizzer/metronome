@@ -2,11 +2,25 @@
 // db.js — all communication with Neon goes through this file.
 // Nothing else in the app should know about @neondatabase/neon-js.
 //
-// We use SupabaseAuthAdapter rather than the native API because the
-// native client.auth doesn't expose onAuthStateChange — only the
-// Supabase-compatible adapter does, and main.js needs that to detect
-// sign-in/out. Source: github.com/neondatabase/neon-js packages/neon-js
-// README (still beta as of writing — re-check that README on upgrade).
+// Two clients, same Auth URL, sharing the same session/cookies:
+//
+// 1. `client` — wrapped in SupabaseAuthAdapter. Used for everything:
+//    signUp, signInWithPassword, getSession, onAuthStateChange, and all
+//    `.from(...)` database queries. Chosen because the native client
+//    doesn't expose onAuthStateChange, which main.js needs.
+//
+// 2. `authNative` — same Auth URL, no adapter. Used ONLY for
+//    emailOtp.verifyEmail(), because that method lives on the default
+//    Better Auth surface and is NOT part of SupabaseAuthAdapter's
+//    documented API (confirmed against both the npm page and GitHub
+//    README for @neondatabase/neon-js — signUp/signInWithPassword/
+//    getSession/getUser/signOut/onAuthStateChange is the full adapter
+//    surface, no emailOtp.*). Calling client.auth.emailOtp.verifyEmail
+//    throws "undefined is not an object" because that path simply isn't
+//    proxied through the adapter.
+//
+// Still a beta package as of writing — re-check the README on upgrade
+// in case the adapter surface changes.
 // ============================================================
 import { createClient, SupabaseAuthAdapter } from '@neondatabase/neon-js';
 
@@ -23,6 +37,13 @@ export const client = createClient({
 	dataApi: {
 		url: DATA_API_URL,
 	},
+});
+
+// Auth-only, unadapted client — same Auth URL, shares session storage
+// with `client` above, used solely for the emailOtp.verifyEmail call.
+const authNative = createClient({
+	auth: { url: AUTH_URL },
+	dataApi: { url: DATA_API_URL },
 });
 
 // ---------- Auth ----------
@@ -48,7 +69,7 @@ export async function signOut() {
 // verified, depending on Neon's project config — main.js checks for a
 // session and routes accordingly either way.
 export async function verifyEmail(email, otp) {
-	const { data, error } = await client.auth.emailOtp.verifyEmail({ email, otp });
+	const { data, error } = await authNative.auth.emailOtp.verifyEmail({ email, otp });
 	if (error) throw error;
 	return data;
 }
@@ -56,7 +77,7 @@ export async function verifyEmail(email, otp) {
 // Re-sends the sign-up verification code, in case the first one expired
 // (Neon's codes expire after 10 minutes) or never arrived.
 export async function resendVerification(email) {
-	const { error } = await client.auth.sendVerificationEmail({ email });
+	const { error } = await authNative.auth.sendVerificationEmail({ email });
 	if (error) throw error;
 }
 
