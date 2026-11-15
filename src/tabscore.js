@@ -55,7 +55,9 @@ function endsPhrase(bar) {
 }
 
 // The slicer's bar list for one track (see src/slicer.js).
-export function barsFromScore(score, trackIndex = 0) {
+// tempoKnown: false when the file states no tempo (alphaTab then assumes
+// 120 at bar 1, which must not count as the file's tempo).
+export function barsFromScore(score, trackIndex = 0, { tempoKnown = true } = {}) {
 	const track = score?.tracks?.[trackIndex];
 	if (!track) throw new Error('That track is missing from the file');
 	const staff = track.staves?.[0];
@@ -86,9 +88,8 @@ export function barsFromScore(score, trackIndex = 0) {
 			shortNotes: durations.filter((d) => d <= SIXTEENTH).length,
 			legato,
 			marker,
-			tempo: i === 0 || changed ? tempo : null,
+			tempo: (i === 0 && tempoKnown) || (i > 0 && changed) ? tempo : null,
 			phraseEnd: endsPhrase(bar) || Boolean(masterBars[i + 1]?.section) || i === masterBars.length - 1,
-			start: mb.start ?? null, // tick where the bar starts (for playback ranges)
 			ticks,
 		};
 	});
@@ -100,12 +101,43 @@ export function scoreTitle(score, fileName = '') {
 	return String(fileName).replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Imported tab';
 }
 
-// Ticks to play for bars [start, end] (1-based). A seam ends on the first
-// beat of its second bar.
-export function tickRange(bars, start, end, seam = false) {
-	const a = bars.find((b) => b.index === start);
-	const z = bars.find((b) => b.index === end);
-	if (!a || !z || a.start === null || z.start === null) return null;
-	const beat = z.ticks / Math.max(1, Math.round(z.beats)) || TICKS_PER_QUARTER;
-	return { startTick: a.start, endTick: seam ? z.start + beat : z.start + z.ticks };
+// Does a MusicXML file state a tempo? Plain XML is checked directly; for
+// compressed .mxl only a tempo other than alphaTab's default 120 proves it.
+// Guitar Pro files always carry one.
+export function fileStatesTempo(format, rawText, score) {
+	if (format === 'gp') return true;
+	if (rawText !== null && rawText !== undefined) return /<per-minute>|<sound[^>]*\btempo\s*=/.test(rawText);
+	return (score?.tempo ?? 120) !== 120;
 }
+
+// The MIDI ticks to play for bars [start, end] (1-based), from alphaTab's
+// tick lookup: `played` lists the bars in playing order with repeats
+// expanded ([{ index (0-based master bar), start, end }]). Uses the FIRST
+// time the range is played straight through; a seam ends one beat into its
+// second bar (`beatTicks`). Null when the bars are never played.
+export function playedRange(played, start, end, { seam = false, beatTicks = 960 } = {}) {
+	const a = start - 1;
+	const z = end - 1;
+	const len = z - a + 1;
+	for (let i = 0; i + len <= played.length; i++) {
+		let ok = true;
+		for (let k = 0; k < len; k++) {
+			if (played[i + k].index !== a + k) {
+				ok = false;
+				break;
+			}
+		}
+		if (!ok) continue;
+		const last = played[i + len - 1];
+		return { startTick: played[i].start, endTick: seam ? last.start + beatTicks : last.end };
+	}
+	// Never played straight through (a jump inside the range): first start → first end after it.
+	const i = played.findIndex((p) => p.index === a);
+	if (i < 0) return null;
+	const j = played.findIndex((p, k) => k >= i && p.index === z);
+	if (j < 0) return null;
+	return { startTick: played[i].start, endTick: seam ? played[j].start + beatTicks : played[j].end };
+}
+
+// alphaTab's MidiTickLookup → the `played` list above.
+export const playedBars = (tickLookup) => (tickLookup?.masterBars ?? []).map((m) => ({ index: m.masterBar.index, start: m.start, end: m.end }));

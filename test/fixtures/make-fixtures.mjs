@@ -81,3 +81,45 @@ ${part('P2', OPEN, tuning([['E', 2], ['A', 2], ['D', 3], ['G', 3], ['B', 3], ['E
 `;
 	fs.writeFileSync(new URL('duet.musicxml', here), duet);
 }
+
+// repeat.musicxml: 8 bars, bars 3–4 repeated once, so the played order is
+// 1 2 3 4 3 4 5 6 7 8 (bars 5–6 start 6 played bars in, not 4).
+{
+	const n = (s, f) => note(q(s, f));
+	const measures = Array.from({ length: 8 }, (_, i) => {
+		const k = i + 1;
+		const attrs = k === 1 ? `<attributes><divisions>4</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>TAB</sign><line>5</line></clef><staff-details><staff-lines>6</staff-lines>${[['E', 2], ['A', 2], ['D', 3], ['G', 3], ['B', 3], ['E', 4]].map(([st, o], j) => `<staff-tuning line="${j + 1}"><tuning-step>${st}</tuning-step><tuning-octave>${o}</tuning-octave></staff-tuning>`).join('')}</staff-details></attributes>${dir('<metronome><beat-unit>quarter</beat-unit><per-minute>120</per-minute></metronome>', '<sound tempo="120"/>')}` : '';
+		const left = k === 3 ? '<barline location="left"><bar-style>heavy-light</bar-style><repeat direction="forward"/></barline>' : '';
+		const right = k === 4 ? '<barline location="right"><bar-style>light-heavy</bar-style><repeat direction="backward"/></barline>' : '';
+		return `<measure number="${k}">${left}${attrs}${[n(2, k), n(2, k), n(1, k), n(1, k)].join('')}${right}</measure>`;
+	});
+	fs.writeFileSync(
+		new URL('repeat.musicxml', here),
+		`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<!-- Test fixture written for this repo (not a transcription of any published piece). -->
+<score-partwise version="4.0"><work><work-title>Fixture Repeat</work-title></work>
+<part-list><score-part id="P1"><part-name>Guitar</part-name></score-part></part-list>
+<part id="P1">${measures.join('\n')}</part>
+</score-partwise>
+`,
+	);
+}
+
+// notation.musicxml: a melody on a treble staff with no tab information and
+// no tempo (alphaTab falls back to 120, which must not count as "from the file").
+{
+	const steps = [['C', 4], ['D', 4], ['E', 4], ['F', 4], ['G', 4], ['A', 4], ['B', 4], ['C', 5]];
+	const measures = [0, 1].map((m) => `<measure number="${m + 1}">${m === 0 ? '<attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>' : ''}${steps.slice(m * 4, m * 4 + 4).map(([st, o]) => `<note><pitch><step>${st}</step><octave>${o}</octave></pitch><duration>1</duration><voice>1</voice><type>quarter</type></note>`).join('')}</measure>`);
+	fs.writeFileSync(
+		new URL('notation.musicxml', here),
+		`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<!-- Test fixture written for this repo (not a transcription of any published piece). -->
+<score-partwise version="4.0"><work><work-title>Fixture Scale</work-title></work>
+<part-list><score-part id="P1"><part-name>Melody</part-name></score-part></part-list>
+<part id="P1">${measures.join('\n')}</part>
+</score-partwise>
+`,
+	);
+}
