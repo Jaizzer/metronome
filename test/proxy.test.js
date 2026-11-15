@@ -66,3 +66,27 @@ test('passes set-auth-jwt through and makes cookies host-only', async () => {
 test('rewriteSetCookie only drops Domain', () => {
 	assert.equal(rewriteSetCookie('a=1; Domain=.x.com; Path=/; Secure'), 'a=1; Path=/; Secure');
 });
+
+test('path traversal out of the auth base is rejected', async () => {
+	const calls = withFetch(() => new Response('{}'));
+	const bad = [
+		'/api/auth-proxy?__path=../../rest/v1/practices',
+		'/api/auth-proxy?__path=%2e%2e/%2e%2e/x',
+		'/api/auth-proxy?__path=%252e%252e/x',
+		'/api/auth-proxy?__path=..%5c..%5cx',
+		'/api/auth-proxy?__path=sign-in/./../../x',
+		'/api/auth-proxy?__path=get-session%3Fa%3D1',
+		'/api/auth/%2e%2e/%2e%2e/x',
+	];
+	for (const path of bad) {
+		const res = await proxy(req(path), UPSTREAM);
+		assert.equal(res.status, 400, path);
+	}
+	assert.equal(calls.length, 0);
+});
+
+test('normal nested paths still go through', async () => {
+	const calls = withFetch(() => new Response('{}'));
+	await proxy(req('/api/auth-proxy?__path=email-otp/verify-email', { method: 'POST', headers: { origin: APP }, body: '{}' }), UPSTREAM);
+	assert.equal(calls[0].url, UPSTREAM + '/email-otp/verify-email');
+});

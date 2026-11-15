@@ -77,6 +77,24 @@ export function rewriteSetCookie(cookie) {
 		.join(';');
 }
 
+// Builds the upstream URL, refusing anything that could climb out of the
+// auth base path: dot segments, backslashes, or their %-encoded forms.
+export function safeTarget(base, subPath, search = '') {
+	let decoded = subPath;
+	try {
+		for (let i = 0; i < 3 && /%/.test(decoded); i++) decoded = decodeURIComponent(decoded);
+	} catch {
+		return null;
+	}
+	if (/\\/.test(decoded) || decoded.split('/').some((seg) => seg === '..' || seg === '.')) return null;
+	if (/[\u0000-\u001f?#]/.test(decoded)) return null;
+	const baseUrl = new URL(base);
+	const target = new URL(base + subPath + search);
+	if (target.origin !== baseUrl.origin) return null;
+	if (target.pathname !== baseUrl.pathname && !target.pathname.startsWith(baseUrl.pathname + '/')) return null;
+	return target.toString();
+}
+
 export function isAllowedOrigin(request) {
 	const origin = request.headers.get('origin');
 	if (!origin) return request.method === 'GET' || request.method === 'HEAD';
@@ -97,10 +115,14 @@ export async function proxy(request, upstreamBase = process.env.NEON_AUTH_URL) {
 	if (url.searchParams.has('__path')) {
 		subPath = '/' + url.searchParams.get('__path').replace(/^\/+/, '');
 		url.searchParams.delete('__path');
-	} else {
+	} else if (/^\/api\/auth(-proxy)?(\/|$)/.test(url.pathname)) {
 		subPath = url.pathname.replace(/^\/api\/auth(-proxy)?/, '');
+	} else {
+		return json(400, { code: 'PROXY_BAD_PATH', message: 'Invalid auth path' });
 	}
-	const target = upstreamBase.replace(/\/$/, '') + subPath + url.search;
+	const base = upstreamBase.replace(/\/$/, '');
+	const target = safeTarget(base, subPath, url.search);
+	if (!target) return json(400, { code: 'PROXY_BAD_PATH', message: 'Invalid auth path' });
 
 	const headers = new Headers();
 	for (const name of FORWARD_REQUEST_HEADERS) {
