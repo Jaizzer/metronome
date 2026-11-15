@@ -1026,7 +1026,54 @@ input[type='number']::-webkit-outer-spin-button {
 	padding: var(--s3) var(--gutter) var(--s5);
 }
 
-/* The routine as a line of stops. */
+/* The routine as a line of stops (or, when they don't fit, a count and a bar). */
+.stops-wrap {
+	min-width: 0;
+}
+
+.stops-compact {
+	display: grid;
+	gap: var(--s2);
+}
+
+.stops-pos {
+	margin: 0;
+	text-align: center;
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--paper-2);
+}
+
+.stops-pos b {
+	color: var(--paper);
+	font-family: var(--font-num);
+	font-size: 20px;
+	font-weight: 700;
+}
+
+.stops-bar {
+	position: relative;
+	height: 6px;
+	border-radius: 3px;
+	background: var(--rule-strong);
+	overflow: hidden;
+}
+
+.stops-done {
+	position: absolute;
+	inset: 0 auto 0 0;
+	background: var(--amber);
+	opacity: 0.55;
+}
+
+.stops-cur {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	min-width: 6px;
+	background: var(--amber);
+}
+
 .stops {
 	list-style: none;
 	margin: 0;
@@ -1547,7 +1594,7 @@ input[type='range']:focus-visible {
 		column-gap: var(--s7);
 		align-content: start;
 	}
-	.stops {
+	.stops-wrap {
 		grid-area: stops;
 	}
 	.tempo {
@@ -2042,7 +2089,7 @@ dialog p {
 	background: var(--stock-input);
 	color: var(--paper);
 	caret-color: var(--amber);
-	font: 14px/1.3 ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+	font: 16px/1.3 ui-monospace, 'SF Mono', Menlo, Consolas, monospace; /* 16px: iOS doesn't zoom */
 	white-space: pre;
 	overflow-x: auto;
 	resize: vertical;

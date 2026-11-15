@@ -102,7 +102,13 @@
 		</header>
 
 		<div class="player-main">
-			<ol id="stops" class="stops" aria-label="Sections"></ol>
+			<div class="stops-wrap">
+				<ol id="stops" class="stops" aria-label="Sections"></ol>
+				<div id="stops-compact" class="stops-compact" hidden>
+					<p id="stops-pos" class="stops-pos"></p>
+					<div class="stops-bar" aria-hidden="true"><span id="stops-done" class="stops-done"></span><span id="stops-cur" class="stops-cur"></span></div>
+				</div>
+			</div>
 
 			<div class="tempo">
 				<p id="label" class="section-name"></p>

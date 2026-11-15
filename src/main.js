@@ -1280,6 +1280,30 @@ function updatePlayerUI() {
 	$('prevBtn').disabled = activeMetIndex === 0;
 	tabPanel.update(activePractice, met);
 
+	renderStops();
+	updateTally();
+}
+
+// The stop strip: one dot per section while they fit (about 28px each);
+// longer routines get "Section n / N" and a thin bar instead, so nothing in
+// the player is wider than the screen. Prev / Next stay in the transport.
+const STOP_MIN_PX = 28;
+function renderStops() {
+	if (!activePractice || activeMetIndex < 0) return;
+	const list = activePractice.metronomes;
+	const width = $('stops').parentElement.clientWidth || innerWidth;
+	const compact = list.length > Math.max(2, Math.floor(width / STOP_MIN_PX));
+	$('stops').hidden = compact;
+	$('stops-compact').hidden = !compact;
+	if (compact) {
+		$('stops').replaceChildren();
+		const n = list.length;
+		$('stops-pos').replaceChildren('Section ', h('b', {}, String(activeMetIndex + 1)), ` / ${n}`);
+		$('stops-done').style.width = `${(activeMetIndex / n) * 100}%`;
+		$('stops-cur').style.left = `${(activeMetIndex / n) * 100}%`;
+		$('stops-cur').style.width = `${100 / n}%`;
+		return;
+	}
 	$('stops').replaceChildren(
 		...list.map((m, i) =>
 			h(
@@ -1295,8 +1319,9 @@ function updatePlayerUI() {
 			),
 		),
 	);
-	updateTally();
 }
+
+addEventListener('resize', () => view === 'player' && renderStops());
 
 function updateTally() {
 	if (!activePractice || activeMetIndex < 0) return;
@@ -1459,7 +1484,7 @@ modal.addEventListener('close', () => {
 	if (modal._byPointer && el?.matches?.(FOCUS_HOLDERS)) el.blur();
 });
 
-function confirmDialog({ title, text, confirm, onConfirm }) {
+function confirmDialog({ title, text, confirm, onConfirm, danger = true }) {
 	openDialog(
 		title,
 		h('p', {}, text),
@@ -1470,7 +1495,7 @@ function confirmDialog({ title, text, confirm, onConfirm }) {
 			h(
 				'button',
 				{
-					class: 'btn btn-danger',
+					class: danger ? 'btn btn-danger' : 'btn btn-primary',
 					type: 'button',
 					onclick: () => {
 						closeDialog();
@@ -2350,6 +2375,7 @@ const importer = createImporter({
 
 const tabPanel = createTabPanel({
 	toast,
+	confirm: confirmDialog,
 	liveBpm: () => currentBPM,
 	// "Hear it" pauses the click and resumes it afterwards (if it was running).
 	pauseClick: () => {
