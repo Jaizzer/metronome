@@ -1751,6 +1751,10 @@ dialog p {
 	margin: var(--s1) 0 var(--s2);
 }
 
+.sec-kind .seg-btn {
+	min-height: 44px;
+}
+
 /* ---------- Phones ---------- */
 
 @media (max-width: 560px) {

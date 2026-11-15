@@ -39,11 +39,11 @@ import {
 	nextStep,
 	chunkStatus,
 	sessionStart,
-	ownedTempo,
 	streak,
 	dayKey,
 	coldDoneToday,
 	coldThreshold,
+	checkCapFor,
 } from './engine.js';
 
 const $ = (id) => document.getElementById(id);
@@ -816,7 +816,7 @@ function afterAttempt(p, m, attempt) {
 	if (r.join) {
 		m.joined = true;
 		changed = true;
-		msgs.push(`Joined the song at ${ownedTempo(m.log ?? [])} BPM`);
+		msgs.push(`Joined the song at ${r.owned} BPM`);
 	}
 	if (changed) savePractice(p);
 	return msgs.length ? msgs.join(' · ') : null;
@@ -1324,13 +1324,14 @@ function updateTally() {
 function songLineText(p, m) {
 	if (isRun(m)) return 'Run · tap ✗ and keep playing';
 	const log = m.log ?? [];
-	if (!coldDoneToday(log)) {
-		const min = coldThreshold(log);
+	const song = songNow(p);
+	const cc = checkCapFor(m, song);
+	if (!coldDoneToday(log, Date.now(), cc)) {
+		const min = coldThreshold(log, dayKey(Date.now()), cc);
 		return min !== null && currentBPM < min
 			? `Warm-up · daily check from ${min} BPM`
 			: 'First try today · this is your daily check';
 	}
-	const song = songNow(p);
 	const cap = m.joined ? song.cap : song.ceiling;
 	if (currentBPM >= cap) return `Work · at the cap (${cap} BPM)`;
 	const st = streak(log, currentBPM);
