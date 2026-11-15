@@ -111,10 +111,14 @@ export function planChunks(bars, { size = null, density = true, sectionBars = SE
 
 // ---- Review-screen edits (each returns a new array) ----
 
+// Merging joins only neighbouring bars: after a delete, the chunks on either
+// side of the gap stay separate, so deleted bars never come back.
+export const canMerge = (chunks, i) => Boolean(chunks[i] && chunks[i + 1] && chunks[i + 1].start === chunks[i].end + 1);
+
 export function mergeWithNext(chunks, i) {
 	const a = chunks[i];
 	const b = chunks[i + 1];
-	if (!a || !b) return chunks;
+	if (!canMerge(chunks, i)) return chunks;
 	const merged = {
 		start: Math.min(a.start, b.start),
 		end: Math.max(a.end, b.end),

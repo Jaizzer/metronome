@@ -10,6 +10,7 @@ import { textBarsSlice, textDense } from './tabtext.js';
 import {
 	planChunks,
 	mergeWithNext,
+	canMerge,
 	splitChunk,
 	canSplit,
 	renameChunk,
@@ -209,7 +210,13 @@ export function createImporter(opts) {
 					{ class: 'chunk-actions' },
 					h(
 						'button',
-						{ class: 'btn btn-quiet', type: 'button', disabled: i >= st.chunks.length - 1, onclick: (e) => edit(mergeWithNext(st.chunks, i), e, i) },
+						{
+							class: 'btn btn-quiet',
+							type: 'button',
+							disabled: !canMerge(st.chunks, i),
+							title: st.chunks[i + 1] && !canMerge(st.chunks, i) ? 'The next chunk doesn’t start right after this one' : null,
+							onclick: (e) => edit(mergeWithNext(st.chunks, i), e, i),
+						},
 						iconEl('merge'),
 						'Merge with next',
 					),

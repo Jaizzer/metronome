@@ -6,6 +6,7 @@ import {
 	cutRun,
 	planChunks,
 	mergeWithNext,
+	canMerge,
 	splitChunk,
 	canSplit,
 	renameChunk,
@@ -207,4 +208,14 @@ test('summary counts', () => {
 	const list = bars(8);
 	const chunks = planChunks(list, { size: 2 });
 	assert.deepEqual(planSummary(chunks, list), { bars: 8, chunks: 4, seams: 3, dense: 0, sections: 8 });
+});
+
+test('merge after a delete never brings deleted bars back', () => {
+	const chunks = planChunks(bars(8), { size: 2 }); // 1–2, 3–4, 5–6, 7–8
+	const gap = deleteChunk(chunks, 1); // 1–2, 5–6, 7–8
+	assert.equal(canMerge(gap, 0), false);
+	assert.equal(mergeWithNext(gap, 0), gap);
+	assert.equal(canMerge(gap, 1), true);
+	assert.deepEqual(ranges(mergeWithNext(gap, 1)), [[1, 2], [5, 8]]);
+	assert.equal(canMerge(gap, 2), false); // last
 });
