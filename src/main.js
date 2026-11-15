@@ -120,13 +120,140 @@ async function withSync(promise) {
 // ✓/✗ counts are saved as deltas merged into the server's numbers, and
 // routine edits with compare-and-swap, so two tabs/devices never
 // overwrite each other's records (see sync.js).
-const sync = createSync({
-	fetchPractice,
-	casUpdatePractice,
-	fetchTotals: fetchTotalsRow,
-	casUpdateTotals,
-	insertTotals,
-});
+const sync = createSync(
+	{
+		fetchPractice,
+		casUpdatePractice,
+		fetchTotals: fetchTotalsRow,
+		casUpdateTotals,
+		insertTotals,
+	},
+	(state) => persistPending(state),
+);
+
+// ---- Unsaved counts survive closing the tab ----
+// Every change to the unsaved ✓/✗ counts is mirrored to localStorage under
+// a per-tab key (per user). Each tab holds a Web Lock named after its key
+// for as long as it lives; the browser releases it when the tab closes or
+// crashes. Another load (or focus) for that user claims keys whose lock is
+// free (or that are marked `closed`) and saves them.
+// A tab whose key was claimed drops its in-memory copy instead of saving
+// it, so counts are never applied twice. Nothing is sent on pagehide: a
+// request whose answer never arrives can't be confirmed.
+const PENDING_PREFIX = 'metronome:pending:';
+const ORPHAN_AFTER_MS = 10 * 60 * 1000;
+let tabKey = null;
+let storageOk = false;
+
+function lsGet(k) {
+	try {
+		return JSON.parse(localStorage.getItem(k));
+	} catch {
+		return null;
+	}
+}
+
+function persistPending(state = sync.exportState(), closed = false) {
+	if (!tabKey || !storageOk) return;
+	try {
+		if (sync.isEmptyState(state)) localStorage.removeItem(tabKey);
+		else localStorage.setItem(tabKey, JSON.stringify({ beat: Date.now(), closed, state }));
+	} catch {
+		// quota/private mode: counts still save normally while the tab is open
+	}
+}
+
+// False when another tab has claimed (and will save) our unsaved counts.
+function ownsPending() {
+	if (!storageOk || !tabKey) return true;
+	return sync.isEmptyState(sync.exportState()) || lsGet(tabKey) !== null;
+}
+
+const hasLocks = Boolean(navigator.locks?.request);
+let pendingUserId = null;
+
+function takeOver(k) {
+	const v = lsGet(k);
+	localStorage.removeItem(k); // claim first, then take over the counts
+	if (v?.state) sync.importState(v.state);
+}
+
+async function claimOrphans() {
+	if (!storageOk || !tabKey || !pendingUserId) return;
+	const prefix = `${PENDING_PREFIX}${pendingUserId}:`;
+	let keys = [];
+	try {
+		keys = Object.keys(localStorage).filter((k) => k.startsWith(prefix) && k !== tabKey);
+	} catch {
+		return;
+	}
+	let claimed = false;
+	for (const k of keys) {
+		const v = lsGet(k);
+		if (!v || v.closed) {
+			takeOver(k);
+			claimed = true;
+		} else if (hasLocks) {
+			// Free lock = the owning tab is gone. Holding it while we take over
+			// means the owner can't come back mid-claim.
+			await navigator.locks.request(k, { ifAvailable: true }, (lock) => {
+				if (lock && lsGet(k)) {
+					takeOver(k);
+					claimed = true;
+				}
+			});
+		} else if (Date.now() - (v.beat ?? 0) > ORPHAN_AFTER_MS) {
+			takeOver(k);
+			claimed = true;
+		}
+	}
+	if (claimed) scheduleCountFlushes();
+}
+
+async function startPendingStore(userId) {
+	try {
+		localStorage.setItem(PENDING_PREFIX + 'probe', '1');
+		localStorage.removeItem(PENDING_PREFIX + 'probe');
+		storageOk = true;
+	} catch {
+		storageOk = false;
+	}
+	pendingUserId = userId;
+	tabKey = `${PENDING_PREFIX}${userId}:${crypto.randomUUID()}`;
+	// Hold our key's lock for the life of this tab (released on close/crash).
+	if (hasLocks) navigator.locks.request(tabKey, () => new Promise(() => {})).catch(() => {});
+	await claimOrphans();
+	persistPending();
+}
+
+// Heartbeat so a live tab's counts aren't mistaken for an orphan.
+setInterval(() => {
+	if (tabKey && !sync.isEmptyState(sync.exportState())) persistPending();
+}, 60 * 1000);
+
+function scheduleCountFlushes(delay = 300) {
+	if (sync.pendingPracticeIds().length) debounce('practices', flushPractices, delay);
+	if (sync.hasTotalsPending()) debounce('mastery', flushTotals, delay);
+}
+
+// Signed out or the session expired: keep the counts on this device for
+// the next sign-in, and say so once.
+function sessionLost() {
+	if (!currentSession) return;
+	persistPending(sync.exportState(), true); // claimable by the next sign-in
+	tabKey = null;
+	sync.dropCounts();
+	for (const key of ['practices', 'mastery']) {
+		clearTimeout(pendingSaves.get(key)?.timer);
+		pendingSaves.delete(key);
+	}
+	if (view === 'player') stopEverything();
+	recorder.clear();
+	currentSession = null;
+	setAuthMode('signin');
+	showView('auth');
+	$('auth-status').textContent = 'Your session ended. Sign in again; unsaved records are kept on this device.';
+}
 
 // One flush/refresh at a time from this tab.
 let syncChain = Promise.resolve();
@@ -180,6 +307,10 @@ function removeLocalPractice(p) {
 
 async function flushPractices() {
 	await serial(async () => {
+		if (!currentSession || booting) return; // bootApp schedules a flush once routines are loaded
+		if (!ownsPending()) return sync.dropCounts(); // another tab took them over
+		// Counts for routines that no longer exist can't be saved anywhere.
+		for (const id of sync.pendingPracticeIds()) if (!practices.some((p) => p.id === id)) sync.forget(id);
 		const list = practices.filter((p) => sync.hasPending(p.id));
 		if (!list.length) return;
 		try {
@@ -225,8 +356,11 @@ let lastRefresh = 0;
 async function refreshFromServer() {
 	if (!currentSession || booting || Date.now() - lastRefresh < 2000) return;
 	lastRefresh = Date.now();
+	await claimOrphans(); // a tab closed since we loaded may have left counts
 	flushSaves(); // queued saves go first; they merge with the server anyway
 	await serial(async () => {
+		if (!currentSession || !sync.hasTotalsPending()) return;
+		if (!ownsPending()) return sync.dropCounts();
 		try {
 			const [rows, t] = await Promise.all([fetchPractices(), fetchTotalsRow()]);
 			const byId = new Map(practices.map((p) => [p.id, p]));
@@ -272,7 +406,8 @@ document.addEventListener('focusout', () => {
 
 document.addEventListener('visibilitychange', () => {
 	if (document.visibilityState === 'hidden') {
-		setKeepalive(true); // final saves must survive the page going away
+		persistPending();
+		setKeepalive(true); // the page is still alive; give saves the best chance
 		flushSaves();
 	} else {
 		setKeepalive(false);
@@ -280,10 +415,26 @@ document.addEventListener('visibilitychange', () => {
 	}
 });
 window.addEventListener('pagehide', () => {
+	// Hand unsaved counts to the next load instead of sending them now.
+	for (const key of ['practices', 'mastery']) {
+		clearTimeout(pendingSaves.get(key)?.timer);
+		pendingSaves.delete(key);
+	}
+	persistPending(sync.exportState(), true);
 	setKeepalive(true);
-	flushSaves();
+	flushSaves(); // settings only: an idempotent upsert
+});
+window.addEventListener('pageshow', (e) => {
+	if (!e.persisted || !tabKey) return; // back from the back/forward cache
+	if (ownsPending()) {
+		persistPending();
+		scheduleCountFlushes();
+	} else {
+		sync.dropCounts();
+	}
 });
 window.addEventListener('focus', refreshFromServer);
+window.addEventListener('online', () => scheduleCountFlushes(0));
 
 // ---------------- Views + toast ----------------
 
@@ -446,6 +597,9 @@ $('verify-back').onclick = () => {
 
 $('signOutBtn').onclick = async () => {
 	flushSaves();
+	await serial(() => {}); // let queued saves finish while still signed in
+	persistPending(sync.exportState(), true); // anything unsaved waits for the next sign-in
+	tabKey = null;
 	await signOut();
 	location.reload();
 };
@@ -454,6 +608,8 @@ async function bootApp(session) {
 	if (currentSession || booting) return;
 	booting = true;
 	currentSession = session;
+	// Pick up counts a closed tab (or an expired session) left unsaved.
+	await startPendingStore(session?.user?.id ?? 'anon');
 	showView('builder');
 	setSyncIndicator('saving');
 
@@ -468,8 +624,11 @@ async function bootApp(session) {
 			ensureSectionIds(row.metronomes);
 			return row;
 		});
-		totals.s = masteryCounts.success;
-		totals.f = masteryCounts.fail;
+		for (const p of practices) {
+			p.metronomes = reconcileSections(p.metronomes, p.metronomes.map((m) => ({ ...m })), sync.pendingFor(p.id), true);
+		}
+		showTotals({ s: masteryCounts.success, f: masteryCounts.fail });
+		scheduleCountFlushes();
 		showStats = settings.show_stats;
 		metVolume = parseFloat(settings.volume);
 		setSyncIndicator('synced');
@@ -491,7 +650,7 @@ async function bootApp(session) {
 async function init() {
 	onAuthChange((session) => {
 		if (session && !currentSession) bootApp(session);
-		if (!session && currentSession) location.reload();
+		if (!session && currentSession) sessionLost();
 	});
 	setAuthMode('signin');
 	$('auth-status').textContent = 'Checking your session…';
