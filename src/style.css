@@ -1462,3 +1462,7 @@ dialog p {
 		animation-duration: 0ms !important;
 	}
 }
+
+.player-title:focus {
+	outline: none;
+}

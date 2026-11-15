@@ -647,16 +647,27 @@ function isTypingTarget(el) {
 	);
 }
 
+// Controls where Enter already means something (activate / submit).
+// With focus on one of these, Enter is the keyboard's, not the pedal's.
+function isInteractiveTarget(el) {
+	return Boolean(
+		el?.closest?.(
+			'button, a[href], input, select, textarea, summary, [contenteditable=""], [contenteditable="true"], [role=button], [role=switch], [role=link], [role=checkbox], [role=menuitem]',
+		),
+	);
+}
+
 window.addEventListener('keydown', (e) => {
 	if (!currentSession || $('modal').open) return;
-	if (isTypingTarget(e.target)) return;
 
 	// Foot pedal (sends Enter). Handled on keydown + keyup in pedal.js.
 	if (e.key === 'Enter') {
-		e.preventDefault(); // don't also "click" whatever button has focus
+		if (isInteractiveTarget(e.target)) return;
+		e.preventDefault();
 		pedal.keydown(e);
 		return;
 	}
+	if (isTypingTarget(e.target)) return;
 	if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
 		e.preventDefault();
 		if (!e.repeat) undoLast();
@@ -680,6 +691,29 @@ window.addEventListener('keyup', (e) => {
 	if (e.key === 'Enter') pedal.keyup();
 });
 window.addEventListener('blur', () => pedal.cancelPress());
+
+// A mouse/touch click leaves focus on the button, which would swallow the
+// next pedal press (Enter would re-click it). Keyboard clicks (detail 0)
+// keep focus where it is.
+document.addEventListener('click', (e) => {
+	if (e.detail === 0) return;
+	const btn = e.target.closest?.('button, [role=button], [role=switch]');
+	if (btn && document.activeElement === btn) btn.blur();
+});
+
+// After editing a field (Enter, or the value committed), hand focus back so
+// the pedal works again. The auth forms are left alone.
+document.addEventListener('keydown', (e) => {
+	if (e.key !== 'Enter' || e.repeat) return;
+	const input = e.target.closest?.('#app input, #player input');
+	if (!input) return;
+	e.preventDefault();
+	input.blur(); // fires change
+});
+document.addEventListener('change', (e) => {
+	const input = e.target.closest?.('#app input, #player input');
+	if (input && document.activeElement === input) input.blur();
+});
 
 // ---------------- Stats display ----------------
 
@@ -965,7 +999,8 @@ function startRoutine(p) {
 	showView('player');
 	runSection(0);
 	requestWakeLock();
-	$('playPause').focus();
+	// Focus somewhere neutral: Enter (the pedal) must record, not press a button.
+	$('player-title').focus();
 }
 
 function stopEverything({ finished = false } = {}) {
