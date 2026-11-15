@@ -1435,10 +1435,18 @@ $('prevBtn').onclick = () => runSection(activeMetIndex - 1);
 
 const modal = $('modal');
 
+// How the last click happened (pointer or keyboard), so a dialog knows
+// whether its opener should keep focus when it closes.
+let lastClickByPointer = false;
+document.addEventListener('click', (e) => (lastClickByPointer = e.detail > 0), true);
+
 function openDialog(title, ...content) {
 	$('modal-title').textContent = title;
 	$('modal-content').replaceChildren(...content);
-	if (!modal.open) modal.showModal();
+	if (!modal.open) {
+		modal._byPointer = lastClickByPointer;
+		modal.showModal();
+	}
 }
 
 function closeDialog() {
@@ -1447,6 +1455,14 @@ function closeDialog() {
 
 modal.addEventListener('click', (e) => {
 	if (e.target === modal) closeDialog(); // click on the backdrop
+});
+
+// Closing returns focus to the opener (Remove, Reset, Delete, the length
+// button). If a pointer opened the dialog, drop that focus so the next
+// pedal Enter records instead of reopening it; keyboard users keep it.
+modal.addEventListener('close', () => {
+	const el = document.activeElement;
+	if (modal._byPointer && el?.matches?.(FOCUS_HOLDERS)) el.blur();
 });
 
 function confirmDialog({ title, text, confirm, onConfirm }) {
