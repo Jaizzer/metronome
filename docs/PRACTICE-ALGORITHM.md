@@ -1,5 +1,19 @@
 # Practice algorithm v2 (research-based, 2026-11-15)
 
+## Implementation status (phase 1)
+
+Running checklist so work can resume after an interruption (update it with every commit).
+
+- [x] `src/engine.js`: pure logic + tests (`test/engine.test.js`)
+- [ ] Sync: attempts (`log`) as idempotent add/del deltas in `src/sync.js` + tests
+- [ ] Recording: attempt per ✓/✗ in song-mode routines, undo removes it
+- [ ] Ladder after each chunk attempt (up/down/shrink toasts + tone), join the song
+- [ ] startRoutine: chunks start at their owned tempo (capped) on a new day
+- [ ] Builder UI: Song mode switch, target BPM, song summary, Chunk/Run toggle, one-line status per section (details behind a disclosure), Ramp hidden
+- [ ] Player status line
+- [ ] Harness check (screenshots 390/1280, flow), docs (README, DESIGN), deploy check
+
+
 Supersedes the scoring, tempo and planner rules in `PRACTICE-ENGINE.md` (its takes, auto-judge and display notes still apply). Sources and evidence strength: `PRACTICE-RESEARCH.md`. Numbers marked *(default)* are tunable starting settings, not research facts.
 
 ## 0. Ideas it rests on
