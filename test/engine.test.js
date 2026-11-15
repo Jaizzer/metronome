@@ -54,6 +54,14 @@ test('streak stops at a tempo change', () => {
 	assert.deepEqual(streak(log, 64), { kind: null, n: 0 });
 });
 
+test('streak and ladder stay within one day', () => {
+	const log = [at(0, 's', 62, 30), at(1, 's', 62, 0)];
+	assert.deepEqual(streak(log, 62), { kind: 's', n: 1 });
+	assert.equal(ladder(log, 62).action, null);
+	log.push(at(1, 's', 62, 1));
+	assert.equal(ladder(log, 62).action, 'up');
+});
+
 test('ladder: 2 ✓ up, 2 ✗ shrink, 4 ✗ down, cap respected', () => {
 	assert.deepEqual(ladder([at(0, 's', 100, 1), at(0, 's', 100, 2)], 100), { action: 'up', to: 104 });
 	assert.deepEqual(ladder([at(0, 's', 100, 1), at(0, 's', 100, 2)], 100, 102), { action: 'up', to: 102 });

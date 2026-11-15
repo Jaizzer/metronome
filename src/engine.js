@@ -74,14 +74,19 @@ export function stepRate(b) {
 	return STEP;
 }
 
-// Same-kind run at the end of the log, counted only at `bpm`
-// (a tempo change starts a fresh streak).
+// Same-kind run at the end of the log, counted only at `bpm` and within
+// one day (a tempo change or a new day starts a fresh streak: the ladder
+// is in-session, and today's first attempt is the cold check).
 export function streak(log, bpm) {
 	let kind = null;
 	let n = 0;
+	let day = null;
 	for (let i = log.length - 1; i >= 0; i--) {
 		const a = log[i];
 		if (a.bpm !== bpm) break;
+		const d = dayKey(a.t);
+		if (day === null) day = d;
+		else if (d !== day) break;
 		if (kind === null) kind = a.k;
 		if (a.k !== kind) break;
 		n++;
