@@ -11,8 +11,31 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] startRoutine: chunks start at their owned tempo (capped) on a new day
 - [x] Builder UI: Song mode switch, target BPM, song summary, Chunk/Run toggle, one-line status per section (details behind a disclosure), Ramp hidden
 - [x] Player status line
-- [ ] (in progress) Harness check (screenshots 390/1280, flow), docs (README, DESIGN), deploy check
+- [x] Harness check (screenshots 390/1280, scripted flow), docs (README, DESIGN)
+- [ ] Deploy check (Vercel production + 200)
 
+**Built (phase 1)**
+- Song mode per routine (switch in the routine head), stored as `song: { on, target }` on every section; sections carry `kind` ('chunk' | 'run'), `joined` and `log` (attempts `{ id, t, k, bpm }`, newest 400 kept). No schema change.
+- Every ✓/✗ in a song routine is an attempt at the tempo it was played at (live tempo, captured at pedal press). Undo removes the attempt.
+- §3 ladder per chunk: 2 ✓ in a row → +3/4/5% by band (capped: ceiling = 110% of target; joined chunks: song tempo +10%); 2 ✗ → "try half the chunk" prompt; 4 ✗ → −4%. Streaks count within one day only (today's first attempt is the cold check). Short rising/falling tone when the click is running.
+- §4 owned tempo, cold attempts, review gaps 1/3/7/14/30 days, "Due today"; a new day starts each owned chunk at its owned tempo (capped).
+- §5 song tempo, bottleneck, joining; plateau flag with the advice line (§3).
+- §7 displays: song summary line, one status line per section (band, next review, attempts and plateau advice behind a disclosure), player line ("Work · ✓ 1 of 2 to go up · Band 82% · Owned 72", "Cold attempt · …", "Run · tap ✗ and keep playing").
+- Run sections: record only, no ladder, never join, ✗ never stops playback. Song mode ignores Ramp (sections play at their tempo).
+
+**Not built yet**
+- Session planner automation (§6: cold checks → work → trouble cycle → run → finish, interleaving every 3–5 attempts, ~10 min caps).
+- Rest timer between attempts (§2).
+- Entry-point rotation for links (§5) and seams as automatic chunks (§1.3).
+- Mixed-tempo checks every 3rd visit (§3).
+- Burst chunk type (§1.5) and rhythm variations.
+- Automatic chunk halving (the app only prompts "try half the chunk"; splitting is manual).
+- Start-tempo calibration from 70% (§1.4), ✗ taps in runs attributed to chunks by bars, history view.
+
+**Known limits**
+- Undo removes the attempt and its ✓/✗ but does not revert a tempo change or a join the attempt already caused.
+- "Reset stats" clears ✓/✗ counts only; attempt logs (and owned tempos) are kept.
+- Song settings live on the sections, so a routine with no sections can't turn Song mode on (the switch is disabled).
 
 Supersedes the scoring, tempo and planner rules in `PRACTICE-ENGINE.md` (its takes, auto-judge and display notes still apply). Sources and evidence strength: `PRACTICE-RESEARCH.md`. Numbers marked *(default)* are tunable starting settings, not research facts.
 
