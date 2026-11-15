@@ -8,9 +8,11 @@ function harness() {
 	let nextId = 1;
 	const timers = new Map();
 	const log = [];
+	let target = null;
 	const pedal = createPedal({
-		onGood: () => log.push('good'),
-		onBad: () => log.push('bad'),
+		capture: () => target,
+		onGood: (t) => log.push(t === undefined || t === null ? 'good' : `good@${t}`),
+		onBad: (t) => log.push(t === undefined || t === null ? 'bad' : `bad@${t}`),
 		onUndo: (info) => log.push(info.cancelledPending ? 'cancel' : 'undo'),
 		onPending: (on) => log.push(on ? 'pending' : 'idle'),
 		now: () => t,
@@ -39,7 +41,8 @@ function harness() {
 		pedal.keyup();
 	};
 	const records = () => log.filter((x) => !['pending', 'idle'].includes(x));
-	return { pedal, advance, tap, log, records };
+	const setTarget = (v) => (target = v);
+	return { pedal, advance, tap, log, records, setTarget };
 }
 
 test('single tap commits ✓ after the window', () => {
@@ -163,4 +166,52 @@ test('focus loss mid-press forgets the press', () => {
 	h.pedal.cancelPress();
 	h.advance(2000);
 	assert.deepEqual(h.records(), []);
+});
+
+test('the record goes to the target captured at the first press', () => {
+	const h = harness();
+	h.setTarget('A');
+	h.tap();
+	h.setTarget('B'); // section auto-advanced during the window
+	h.advance(DOUBLE_TAP_MS);
+	assert.deepEqual(h.records(), ['good@A']);
+});
+
+test('a double-tap goes to the first press target too', () => {
+	const h = harness();
+	h.setTarget('A');
+	h.tap();
+	h.setTarget('B');
+	h.tap(100);
+	assert.deepEqual(h.records(), ['bad@A']);
+});
+
+test('cancelPending drops a pending ✓', () => {
+	const h = harness();
+	h.tap();
+	assert.equal(h.pedal.cancelPending(), true);
+	h.advance(2000);
+	assert.deepEqual(h.records(), []);
+	assert.equal(h.pedal.cancelPending(), false);
+});
+
+test('cancelPending during a second press: release adds nothing', () => {
+	const h = harness();
+	h.tap();
+	h.advance(100);
+	h.pedal.keydown({});
+	assert.equal(h.pedal.cancelPending(), true);
+	h.advance(50);
+	h.pedal.keyup();
+	h.advance(2000);
+	assert.deepEqual(h.records(), []);
+});
+
+test('after cancelPending the next tap is a fresh ✓', () => {
+	const h = harness();
+	h.tap();
+	h.pedal.cancelPending();
+	h.tap(100);
+	h.advance(DOUBLE_TAP_MS);
+	assert.deepEqual(h.records(), ['good']);
 });

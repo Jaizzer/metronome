@@ -16,7 +16,11 @@
 export const DOUBLE_TAP_MS = 600;
 export const HOLD_MS = 800;
 
+// capture() is called when a burst's first press goes down; its result is
+// handed to onGood/onBad, so the record lands on the section that was
+// current when the foot moved, not 600 ms later.
 export function createPedal({
+	capture = () => null,
 	onGood,
 	onBad,
 	onUndo,
@@ -32,6 +36,8 @@ export function createPedal({
 	let goodTimer = null; // pending ✓, fires when the window expires
 	let burstResolved = false; // ✗ already committed for this window
 	let secondPress = false; // foot is down for a possible second tap
+	let pressTarget = null; // capture() at this press
+	let burstTarget = null; // capture() at the burst's first press
 
 	function setPending(on) {
 		onPending(on);
@@ -51,6 +57,7 @@ export function createPedal({
 		// is still down. Release decides ✗; a hold drops the ✓ instead.
 		secondPress = goodTimer !== null && downAt - windowStart < DOUBLE_TAP_MS;
 		if (secondPress) clearPendingGood();
+		else pressTarget = capture();
 		holdTimer = setTimer(() => {
 			holdTimer = null;
 			heldLongEnough = true;
@@ -84,7 +91,7 @@ export function createPedal({
 			secondPress = false;
 			burstResolved = true;
 			setPending(false);
-			onBad();
+			onBad(burstTarget);
 			return;
 		}
 
@@ -94,12 +101,13 @@ export function createPedal({
 		// First tap of a new burst → pending ✓, committed when the window ends.
 		windowStart = pressedAt;
 		burstResolved = false;
+		burstTarget = pressTarget;
 		setPending(true);
 		goodTimer = setTimer(
 			() => {
 				goodTimer = null;
 				setPending(false);
-				onGood();
+				onGood(burstTarget);
 			},
 			Math.max(0, DOUBLE_TAP_MS - (now() - pressedAt)),
 		);
@@ -116,9 +124,27 @@ export function createPedal({
 		if (secondPress) {
 			secondPress = false;
 			setPending(false);
-			onGood();
+			onGood(burstTarget);
 		}
 	}
 
-	return { keydown, keyup, cancelPress };
+	// Undo pressed (button / Cmd-Z) while a ✓ is still pending: drop it.
+	// Returns true if there was one to drop.
+	function cancelPending() {
+		if (goodTimer === null && !secondPress) return false;
+		clearPendingGood();
+		if (secondPress) {
+			// Foot still down on a second tap: its release must not become a ✗.
+			secondPress = false;
+			heldLongEnough = true;
+			if (holdTimer !== null) clearTimer(holdTimer);
+			holdTimer = null;
+		}
+		windowStart = null;
+		burstResolved = false;
+		setPending(false);
+		return true;
+	}
+
+	return { keydown, keyup, cancelPress, cancelPending };
 }

@@ -566,6 +566,12 @@ function record(kind, target = currentTarget()) {
 }
 
 function undoLast() {
+	// A ✓ still waiting out the double-tap window is the newest record:
+	// cancel it instead of undoing the one before it.
+	if (pedal.cancelPending()) {
+		cancelPendingToast();
+		return;
+	}
 	const entry = recorder.undo();
 	if (!entry) {
 		toast('Nothing to undo');
@@ -604,11 +610,19 @@ function strike(id, cls, ms) {
 	el._strikeTimers[cls] = setTimeout(() => el.classList.remove(cls), ms);
 }
 
+let pedalPending = false;
+// Undo is possible with a saved record or a ✓ still pending.
+const canUndo = () => recorder.size > 0 || pedalPending;
+
 const pedal = createPedal({
-	onGood: () => record('s'),
-	onBad: () => record('f'),
+	capture: () => currentTarget(),
+	onGood: (target) => record('s', target),
+	onBad: (target) => record('f', target),
 	onUndo: ({ cancelledPending }) => (cancelledPending ? cancelPendingToast() : undoLast()),
 	onPending: (on) => {
+		pedalPending = on;
+		$('undoBtn').disabled = !canUndo();
+		$('bar-undo').disabled = !canUndo();
 		for (const id of ['pedal-pending', 'bar-pending']) {
 			const el = $(id);
 			el.hidden = !on; // un-hiding restarts the shrinking dot that times the window
@@ -926,7 +940,7 @@ function updateTally() {
 		h('span', {}, 'Routine ', h('b', {}, formatAccuracy(rt))),
 		h('span', {}, 'All-time ', h('b', {}, `${formatAccuracy(totals)} of ${totals.s + totals.f}`)),
 	);
-	$('undoBtn').disabled = recorder.size === 0;
+	$('undoBtn').disabled = !canUndo();
 }
 
 // Keep the phone screen awake while a routine plays (music-stand use).
@@ -1471,7 +1485,7 @@ function renderRecordBar() {
 			'Pedal records to',
 			h('b', {}, t.section ? `${t.practice.name} › ${t.section.name}` : t.practice.name),
 		);
-	$('bar-undo').disabled = recorder.size === 0;
+	$('bar-undo').disabled = !canUndo();
 }
 
 function renderBuilder({ keepFocus = false } = {}) {
