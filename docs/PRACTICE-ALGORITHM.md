@@ -12,7 +12,7 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Builder UI: Song mode switch, target BPM, song summary, Chunk/Run toggle, one-line status per section (details behind a disclosure), Ramp hidden
 - [x] Player status line
 - [x] Harness check (screenshots 390/1280, scripted flow), docs (README, DESIGN)
-- [ ] Deploy check (Vercel production + 200)
+- [x] Deploy check (Vercel production + 200)
 
 **Built (phase 1)**
 - Song mode per routine (switch in the routine head), stored as `song: { on, target }` on every section; sections carry `kind` ('chunk' | 'run'), `joined` and `log` (attempts `{ id, t, k, bpm }`, newest 400 kept). No schema change.
