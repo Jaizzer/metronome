@@ -49,7 +49,7 @@ Every ✓/✗ record floods its panel (and the record-bar button) with solid ink
 - **Beat blocks**: four bars; beat 1 lights amber, others paper.
 - **Pending chip**: a green dot that shrinks over the 600 ms double-tap window.
 - **Toast**: top-centre, ink-coloured by kind, 1.4–2 s, `role=status`.
-- **Focus**: 3px amber outline, 2px offset. A mouse/touch click blurs the button, switch or `<summary>` it hit (or, when the click re-drew the builder, the re-drawn copy keepFocus focused), so the next pedal Enter records and Space pauses instead of re-pressing it. Keyboard activation keeps focus on the same control, including the same half of Chunk | Run. Text selection is amber with stock text.
+- **Focus**: 3px amber outline, 2px offset. After any mouse/touch click, the focused button, switch or `<summary>` is blurred (the clicked one, its re-drawn copy, or Play/Pause whose icon was swapped), except inside an open dialog, so the next pedal Enter records and Space pauses instead of re-pressing it. A dialog opened by a pointer drops the opener's returned focus when it closes (Cancel, Escape, backdrop), so Enter can't reopen it; a dialog opened from the keyboard returns focus to its opener. Keyboard activation keeps focus on the same control, including the same half of Chunk | Run. Text selection is amber with stock text.
 - **Motion**: only the overprint, toast slide (250 ms ease-out), and switch thumb; all disabled under `prefers-reduced-motion`.
 - **Layout**: single column, max 640px for routines; player goes two-column (tempo | tally) from 900px.
 - **Builder head**: "Routines" with the List | Slide switch and a 48px **+** button (aria-label and title "New routine", the one icon-only control) beside it; under it one quiet all-time line (`All-time ✓ 19 ✗ 6 · 76%`, no rules). **New routine** is also a dashed full-width button after the last routine. Slide mode adds ‹ n / N › above the track and dots below it; off-screen routines are `inert`, the choice is per device (`localStorage`), and the slide follows the routine the pedal records to.
@@ -76,3 +76,5 @@ Owner's complaint: "clunky and overwhelming". Critique: every section showed all
 - [x] Review round 1 deploy check (Vercel production bf3b4b5: success, URL 200)
 - [x] Review round 2: clicks/taps on Loop, Song mode, Ramp, Chunk | Run no longer leave focus on the re-drawn control (pedal Enter records, setting unchanged; `p2keys.mjs` checks mouse, touch and keyboard); keyboard focus stays on the same Chunk | Run button; row BPM unit and ramp "to" kept for screen readers
 - [x] Review round 2 deploy check (Vercel production 184ba41: success, URL 200)
+- [x] Close-out: pointer clicks on Play/Pause no longer keep focus (pedal Enter records, playback unchanged); pointer-opened dialogs drop the opener's focus on close, keyboard-opened ones return it (`p2keys.mjs`: Play/Pause mouse + tap, 4 dialogs × Cancel/Escape, keyboard open + Escape)
+- [ ] Close-out deploy check
