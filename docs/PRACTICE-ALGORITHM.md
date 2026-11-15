@@ -15,6 +15,8 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Deploy check (Vercel production + 200)
 - [x] Review round 1: probe-tempo cold checks (owned tempo keeps rising), warm-ups don't count, runs never due, settings from the first section that has them, `joined` one-way in sync, plateau counts ✗-only days, Chunk | Run inside the disclosure, due names in the summary, new-day start on load/day change, plainer 22–24px player line
 - [x] Round 1 deploy check
+- [x] Review round 2: daily-check threshold capped (lowered target / manual overshoot), warm-ups before the check don't move the tempo, 44px Chunk | Run buttons
+- [ ] Round 2 deploy check
 
 **Built (phase 1)**
 - Song mode per routine (switch in the routine head), stored as `song: { on, target }` on every section; sections carry `kind` ('chunk' | 'run'), `joined` and `log` (attempts `{ id, t, k, bpm }`, newest 400 kept). No schema change.
@@ -73,7 +75,8 @@ Supersedes the scoring, tempo and planner rules in `PRACTICE-ENGINE.md` (its tak
 
 ## 4. Owned tempo (retention)
 - **Probe tempo** = the previous practice day's top ✓ tempo on that chunk, capped by the chunk's cap (fallback: the owned tempo, then the chunk's current tempo). Each session **starts at the probe tempo**.
-- **Cold attempt (the daily check)** = the first attempt of the day at or above stepDown(previous practice day's top ✓) (−4%). Slower attempts before it are warm-ups and don't count. On the first day (or after a day with no ✓) the first attempt counts.
+- **Cold attempt (the daily check)** = the first attempt of the day at or above stepDown(min(previous practice day's top ✓, the chunk's cap)) (−4%). Capping it means a lowered target or a tempo pushed above the cap by hand can't make the check impossible. Slower attempts before it are warm-ups: they're recorded but never move the tempo. After the check, the ladder works at any tempo. On the first day (or after a day with no ✓) the first attempt counts.
+- *Implementation note:* a joined chunk's cap depends on the song tempo, which depends on owned tempos, which depend on the cap. `songState` breaks the loop in two passes: owned tempos checked against the ceiling give `checkCap` (song tempo +10% from that pass), the cap all cold checks use; owned tempos checked against `checkCap` give the song tempo and the climbing cap.
 - **Cold ✓** → keep climbing from the probe (the ladder). **Cold ✗** → the working tempo drops to max(owned tempo, stepDown(probe)) (no owned tempo: stepDown(probe)), and the chunk goes into today's work queue.
 - **Owned tempo** = the highest tempo whose **cold check passed on 2 separate days**. Because the check is played at yesterday's top, owned tempo rises with a one-day lag (10-day all-clean simulation from 70 toward 120: owned 70, 76, 77, 84, 85, 92, 94, 101, 103).
 
