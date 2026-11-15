@@ -218,16 +218,17 @@ function lowestJoined(chunks, cap) {
 // and don't count. joined: chunks that have entered the song.
 // Cold checks depend on the cap and the cap on the song tempo, so the song
 // tempo is found in two passes: owned tempos checked against the ceiling
-// give `checkCap` (the joined chunks' cap for cold checks), and owned tempos
-// checked against checkCap give the song tempo and the climbing `cap`.
+// give `checkCap` (the joined chunks' cap), and owned tempos checked against
+// checkCap give the song tempo. The same cap serves the cold check, the
+// day's start tempo and the ladder, so a start can never sit below the
+// check threshold (`cap` is kept as an alias of `checkCap`).
 export function songState(sections, target) {
 	const chunks = sections.filter((m) => (m.kind ?? 'chunk') !== 'run');
 	const ceiling = target ? Math.round(target * CEILING) : MAX_BPM;
 	const first = lowestJoined(chunks, ceiling);
 	const checkCap = capOfTempo(first.tempo, ceiling);
 	const { tempo, bottleneck } = first.tempo === null ? first : lowestJoined(chunks, checkCap);
-	const cap = capOfTempo(tempo, ceiling);
-	return { tempo, bottleneck, cap, ceiling, checkCap, pct: tempo && target ? Math.round((tempo / target) * 100) : null };
+	return { tempo, bottleneck, cap: checkCap, ceiling, checkCap, pct: tempo && target ? Math.round((tempo / target) * 100) : null };
 }
 
 // The cap a chunk's cold checks are measured against.
@@ -264,15 +265,13 @@ export function chunkStatus(section, song, now = Date.now()) {
 	};
 }
 
-const capFor = (section, song) => (section.joined ? song.cap : song.ceiling);
-
 // The tempo today's cold check is played at (the probe): the previous
 // practice day's top ✓ tempo, capped. Falls back to the owned tempo, then
 // the chunk's current tempo. Owned tempo then rises with a one-day lag.
 export function sessionStart(section, song, now = Date.now()) {
 	const log = section.log ?? [];
 	const start = previousTop(log, dayKey(now)) || ownedTempo(log, checkCapFor(section, song)) || section.startBPM;
-	return Math.min(start, capFor(section, song));
+	return Math.min(start, checkCapFor(section, song));
 }
 
 // Everything that follows one attempt on a section (the calls main.js
@@ -287,8 +286,8 @@ export function nextStep(section, sections, target, attempt) {
 	if ((section.kind ?? 'chunk') === 'run') return { action: null, to: attempt.bpm, join: false, owned: null };
 	const log = section.log ?? [];
 	const song = songState(sections, target);
-	const cap = capFor(section, song);
-	const cc = checkCapFor(section, song);
+	const cc = checkCapFor(section, song); // cold check, start tempo and ladder share one cap
+	const cap = cc;
 	const owned = ownedTempo(log, cc);
 	const today = dayKey(attempt.t);
 	const cold = coldAttempts(log, cc).find((c) => c.day === today);

@@ -1332,7 +1332,7 @@ function songLineText(p, m) {
 			? `Warm-up · daily check from ${min} BPM`
 			: 'First try today · this is your daily check';
 	}
-	const cap = m.joined ? song.cap : song.ceiling;
+	const cap = cc; // the same cap as the daily check and the ladder
 	if (currentBPM >= cap) return `Work · at the cap (${cap} BPM)`;
 	const st = streak(log, currentBPM);
 	if (st.kind === 's') return `Work · ${Math.max(1, 2 - st.n)} more ✓ to go up`;

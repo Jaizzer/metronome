@@ -247,3 +247,29 @@ test('warm-ups before the daily check don’t move the tempo; after it the ladde
 	play('s', 60, 3);
 	assert.equal(play('s', 60, 4).action, 'up'); // after the check: normal ladder
 });
+
+test('start tempo and ladder use the daily-check cap: no warm-up stall after an overshoot', () => {
+	// B owns 100 → first-pass song tempo 100, check cap 110. C was pushed to 130
+	// by hand; with the check capped its cold checks were ✗, so its owned tempo
+	// (90) becomes the song tempo. A climbing cap of 99 would start C below the
+	// check threshold (106) and every attempt would be a warm-up all day.
+	const b = { joined: true, startBPM: 100, log: [at(0, 's', 100), at(1, 's', 100)] };
+	const c = {
+		joined: true,
+		startBPM: 121,
+		log: [at(0, 's', 90), at(1, 's', 90, 0), at(1, 's', 130, 5), at(2, 'f', 112, 0), at(2, 's', 126, 1), at(3, 'f', 112, 0), at(3, 's', 121, 1)],
+	};
+	const song = songState([b, c], 120);
+	assert.equal(song.tempo, 90);
+	assert.equal(song.checkCap, 110);
+	assert.equal(song.cap, song.checkCap);
+	const day4 = T0 + 4 * DAY;
+	const start = sessionStart(c, song, day4);
+	const min = coldThreshold(c.log, dayKey(day4), checkCapFor(c, song));
+	assert.ok(start >= min, `start ${start} must reach the check threshold ${min}`);
+	const a = at(4, 's', start, 0);
+	c.log.push(a);
+	const r = nextStep(c, [b, c], 120, a);
+	assert.equal(r.warmup, undefined); // the first attempt is the daily check
+	assert.ok(coldDoneToday(c.log, day4, checkCapFor(c, song)));
+});
