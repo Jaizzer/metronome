@@ -43,3 +43,13 @@ Recording, device copies and same-device playback keep working; uploads and cros
 2. Mac server + launchd.
 3. Tailscale + HTTPS.
 4. Outbox sync, resumable uploads, streaming, iCloud keepers, status chip.
+
+## Block mode (✓/✗ drive the tempo), added 2026-11-15
+Owner's own rule, replacing the rolling-10 idea:
+- A **block** = 30 attempts at one BPM. Pass = **24 ✓** (80%). Both editable per section.
+- The **7th ✗ fails the block at once** → sound cue, counters reset, same BPM. Reaching 24 ✓ with ≤ 6 ✗ passes it at once.
+- Pass → **+5 BPM** (default). **2 failed blocks in a row** at the same BPM → **−5 BPM** (default). Step sizes editable.
+- Player: `Block 3 · ✓ 18 / 24 · ✗ 4 of 6` plus "6 more ✓ to pass · 2 ✗ left". Sound cues for pass / fail / tempo change; never a dialog mid-run.
+- Every attempt is stored with its BPM inside the section JSON (no schema change). The earned BPM becomes the section's start BPM; each section keeps a "best passed BPM".
+- End-of-routine summary: blocks passed/failed and tempo moves per section.
+- Built in step 1 together with takes (same per-attempt data).
