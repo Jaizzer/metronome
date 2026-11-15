@@ -26,8 +26,18 @@ import { createClient, SupabaseAuthAdapter } from '@neondatabase/neon-js';
 
 // Set in .env (see .env.example). Vite exposes VITE_-prefixed vars
 // on import.meta.env at build time.
-const AUTH_URL = import.meta.env.VITE_NEON_AUTH_URL;
+const DIRECT_AUTH_URL = import.meta.env.VITE_NEON_AUTH_URL;
 const DATA_API_URL = import.meta.env.VITE_NEON_DATA_API_URL;
+
+// Neon Auth only trusts http://localhost:5173 (the Vite dev server), so
+// that origin talks to Neon directly. Every other origin (Vercel, vercel
+// dev) goes through the same-origin proxy in api/auth/[...path].js, which
+// also makes the session cookie first-party. Once the production domain is
+// in Neon Auth's trusted domains, drop the proxy and use DIRECT_AUTH_URL
+// everywhere.
+const TRUSTED_DEV_ORIGIN = 'http://localhost:5173';
+const useProxy = location.origin !== TRUSTED_DEV_ORIGIN;
+const AUTH_URL = useProxy ? `${location.origin}/api/auth` : DIRECT_AUTH_URL;
 
 export const client = createClient({
 	auth: {
