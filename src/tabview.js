@@ -149,13 +149,14 @@ export function createTabView(container, { scale = 0.9 } = {}) {
 			emit({ loading: true });
 			if (!playerOn) {
 				playerOn = true;
+				let offs = [];
 				const ready = new Promise((resolve, reject) => {
-					const offReady = api.playerReady.on(() => {
-						offReady?.();
-						resolve();
-					});
-					api.soundFontLoadFailed?.on?.(() => reject(new Error('The sound for “Hear it” couldn’t be loaded')));
-				});
+					offs = [
+						api.playerReady.on(() => resolve()),
+						// A soundfont that can't be fetched (offline) surfaces as an API error.
+						api.error.on(() => reject(new Error('The sound for “Hear it” couldn’t be loaded. Check your connection.'))),
+					];
+				}).finally(() => offs.forEach((off) => off?.()));
 				api.settings.player.playerMode = alphaTab.PlayerMode.EnabledSynthesizer;
 				api.updateSettings();
 				api.render();

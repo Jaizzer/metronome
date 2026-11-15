@@ -71,3 +71,17 @@ test('a file alphaTab can’t read throws', () => {
 		alphaTab.importer.ScoreLoader.loadScoreFromBytes(new TextEncoder().encode('not a tab file'), new alphaTab.Settings()),
 	);
 });
+
+test('two tracks: the guitar is picked, not the bass that comes first', () => {
+	const score = load('duet.musicxml');
+	const tracks = trackList(score);
+	assert.deepEqual(tracks.map((t) => [t.name, t.strings, t.guitar]), [
+		['Bass', 4, false],
+		['Lead guitar', 6, true],
+	]);
+	assert.equal(defaultTrack(score), 1);
+	const bars = barsFromScore(score, 1);
+	assert.equal(bars.length, 2);
+	assert.equal(bars[0].tempo, 132);
+	assert.deepEqual(bars.map((b) => b.notes), [4, 4]);
+});

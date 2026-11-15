@@ -58,3 +58,26 @@ const at = await import('@coderline/alphatab/core');
 const settings = new at.Settings();
 const score = at.importer.ScoreLoader.loadScoreFromBytes(new TextEncoder().encode(out), settings);
 fs.writeFileSync(new URL('etude.gp', here), new at.exporter.Gp7Exporter().export(score, settings));
+
+// duet.musicxml: two tracks, bass first, so the importer has to pick the
+// guitar (track 2) by default and offer a track picker.
+{
+	const BASS = { 1: 43, 2: 38, 3: 33, 4: 28 };
+	const pitch = (midi) => `<pitch><step>${NAMES[midi % 12]}</step>${ALTER[midi % 12] ? '<alter>1</alter>' : ''}<octave>${Math.floor(midi / 12) - 1}</octave></pitch>`;
+	const n = (open, s, f) => `<note>${pitch(open[s] + f)}<duration>4</duration><voice>1</voice><type>quarter</type><notations><technical><string>${s}</string><fret>${f}</fret></technical></notations></note>`;
+	const tuning = (list) => `<staff-details><staff-lines>${list.length}</staff-lines>${list.map(([s, o], i) => `<staff-tuning line="${i + 1}"><tuning-step>${s}</tuning-step><tuning-octave>${o}</tuning-octave></staff-tuning>`).join('')}</staff-details>`;
+	const part = (id, open, tune, frets) =>
+		`<part id="${id}">${frets
+			.map((bar, i) => `<measure number="${i + 1}">${i === 0 ? `<attributes><divisions>4</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>TAB</sign><line>5</line></clef>${tune}</attributes>${id === 'P1' ? '<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>132</per-minute></metronome></direction-type><sound tempo="132"/></direction>' : ''}` : ''}${bar.map(([s, f]) => n(open, s, f)).join('')}</measure>`)
+			.join('')}</part>`;
+	const duet = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<!-- Test fixture written for this repo (not a transcription of any published piece). -->
+<score-partwise version="4.0"><work><work-title>Fixture Duet</work-title></work>
+<part-list><score-part id="P1"><part-name>Bass</part-name><midi-instrument id="P1-I1"><midi-program>34</midi-program></midi-instrument></score-part><score-part id="P2"><part-name>Lead guitar</part-name><midi-instrument id="P2-I1"><midi-program>30</midi-program></midi-instrument></score-part></part-list>
+${part('P1', BASS, tuning([['E', 1], ['A', 1], ['D', 2], ['G', 2]]), [[[4, 3], [4, 3], [3, 3], [3, 3]], [[4, 5], [4, 5], [3, 5], [3, 5]]])}
+${part('P2', OPEN, tuning([['E', 2], ['A', 2], ['D', 3], ['G', 3], ['B', 3], ['E', 4]]), [[[2, 1], [2, 3], [1, 0], [1, 1]], [[1, 3], [1, 1], [1, 0], [2, 3]]])}
+</score-partwise>
+`;
+	fs.writeFileSync(new URL('duet.musicxml', here), duet);
+}
