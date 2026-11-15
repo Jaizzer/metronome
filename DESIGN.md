@@ -71,4 +71,4 @@ Owner's complaint: "clunky and overwhelming". Critique: every section showed all
 - [x] Harness: before/after screenshots, songflow + slidetest updated and passing, pedal/keyboard check
 - [x] DESIGN.md updated
 - [x] README updated
-- [ ] Deploy check (Vercel production + 200)
+- [x] Deploy check (Vercel production c5416c9: success, URL 200)
