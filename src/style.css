@@ -991,6 +991,18 @@ input[type='number']::-webkit-outer-spin-button {
 	background: var(--amber);
 }
 
+/* Song mode: what the next attempt is for, readable from the stand. */
+.song-line {
+	margin: var(--s1) 0 0;
+	max-width: 520px;
+	font-size: 18px;
+	font-weight: 600;
+	line-height: 1.35;
+	color: var(--paper);
+	text-wrap: balance;
+	font-variant-numeric: tabular-nums;
+}
+
 .time {
 	display: grid;
 	grid-template-columns: auto 1fr;

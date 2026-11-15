@@ -32,6 +32,19 @@ import { createPedal } from './pedal.js';
 import { createRecorder, sectionStats, routineStats, formatAccuracy } from './records.js';
 import { createSync, ensureSectionIds, newSectionId, reconcileSections } from './sync.js';
 import { icons } from './icons.js';
+import {
+	newAttemptId,
+	mergeLog,
+	songState,
+	ladder,
+	shouldJoin,
+	chunkStatus,
+	sessionStart,
+	ownedTempo,
+	band,
+	streak,
+	dayKey,
+} from './engine.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -289,6 +302,18 @@ function savePractice(p) {
 function noteSectionStats(p, section, kind, n) {
 	if (!p?.id || !section?.id || !n) return;
 	sync.addSectionDelta(p.id, section.id, kind, n);
+	debounce('practices', flushPractices, 500);
+}
+
+function noteAttempt(p, section, attempt) {
+	if (!p?.id || !section?.id) return;
+	sync.addAttempt(p.id, section.id, attempt);
+	debounce('practices', flushPractices, 500);
+}
+
+function noteAttemptRemoved(p, section, attemptId) {
+	if (!p?.id || !section?.id) return;
+	sync.removeAttempt(p.id, section.id, attemptId);
 	debounce('practices', flushPractices, 500);
 }
 
@@ -712,14 +737,101 @@ function selectSection(p, section) {
 }
 
 // The section a record is attributed to: the playing one, else the selected one.
+// bpm: the tempo the run was played at (live tempo while playing).
 function currentTarget() {
 	if (view === 'player' && activePractice && activeMetIndex >= 0) {
-		return { practice: activePractice, section: activePractice.metronomes[activeMetIndex] ?? null };
+		return { practice: activePractice, section: activePractice.metronomes[activeMetIndex] ?? null, bpm: currentBPM };
 	}
 	const p = practices.find((x) => x.id === selectedPracticeId) || practices[0];
 	if (!p) return null;
 	const section = p.metronomes.includes(selectedSection) ? selectedSection : (p.metronomes[0] ?? null);
-	return { practice: p, section };
+	return { practice: p, section, bpm: section?.startBPM ?? null };
+}
+
+// ---------------- Song mode (docs/PRACTICE-ALGORITHM.md, src/engine.js) ----------------
+// Routine settings are mirrored on every section as `song: { on, target }`
+// (the row has no other place for them); read from the first section.
+
+const songOf = (p) => p?.metronomes?.[0]?.song ?? null;
+const isSong = (p) => Boolean(songOf(p)?.on);
+const songTarget = (p) => songOf(p)?.target ?? null;
+const isRun = (m) => (m?.kind ?? 'chunk') === 'run';
+const songNow = (p) => songState(p.metronomes, songTarget(p));
+
+function setSong(p, patch) {
+	const next = { on: false, target: null, ...songOf(p), ...patch };
+	for (const m of p.metronomes) m.song = { ...next };
+	savePractice(p);
+}
+
+const playingSection = () => (view === 'player' && activePractice ? activePractice.metronomes[activeMetIndex] : null);
+
+// A short two-note cue for a tempo change, only if the click is running.
+function cueTone(dir) {
+	if (!audioCtx || audioCtx.state !== 'running') return;
+	const t = audioCtx.currentTime + 0.02;
+	const [a, b] = dir === 'up' ? [660, 990] : [990, 660];
+	const osc = audioCtx.createOscillator();
+	const gain = audioCtx.createGain();
+	osc.type = 'sine';
+	osc.frequency.setValueAtTime(a, t);
+	osc.frequency.setValueAtTime(b, t + 0.09);
+	gain.gain.setValueAtTime(Math.max(0.0001, Math.min(0.5, metVolume * 0.25)), t);
+	gain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+	osc.connect(gain);
+	gain.connect(audioCtx.destination);
+	osc.start(t);
+	osc.stop(t + 0.25);
+}
+
+// After an attempt on a chunk: climb/drop the tempo, prompt a shrink, join
+// the song. Returns a toast message or null. Undo doesn't revert these.
+function afterAttempt(p, m, attempt) {
+	if (isRun(m)) return null;
+	const song = songNow(p);
+	const r = ladder(m.log ?? [], attempt.bpm, m.joined ? song.cap : song.ceiling);
+	const msgs = [];
+	let changed = false;
+	if (r.action === 'up' || r.action === 'down') {
+		m.startBPM = r.to;
+		changed = true;
+		if (playingSection() === m) {
+			currentBPM = r.to;
+			isRamping = false;
+			adjustBPMDisplay();
+		}
+		cueTone(r.action);
+		msgs.push(r.action === 'up' ? `↑ ${r.to} BPM · 2 ✓ in a row` : `↓ ${r.to} BPM · 4 ✗ in a row`);
+	} else if (r.action === 'shrink') {
+		msgs.push('2 ✗ in a row · try half the chunk');
+	}
+	if (shouldJoin(m, song)) {
+		m.joined = true;
+		changed = true;
+		msgs.push(`Joined the song at ${ownedTempo(m.log ?? [])} BPM`);
+	}
+	if (changed) savePractice(p);
+	return msgs.length ? msgs.join(' · ') : null;
+}
+
+// A new day: chunks with an owned tempo start there (capped), so the first
+// (cold) attempt of the day tests what was learned.
+function prepareSongSession(p) {
+	if (!isSong(p)) return;
+	const song = songNow(p);
+	const today = dayKey(Date.now());
+	let changed = false;
+	for (const m of p.metronomes) {
+		if (isRun(m)) continue;
+		const log = m.log ?? [];
+		if (ownedTempo(log) === null || log.some((a) => dayKey(a.t) === today)) continue;
+		const start = sessionStart(m, song);
+		if (start !== m.startBPM) {
+			m.startBPM = start;
+			changed = true;
+		}
+	}
+	if (changed) savePractice(p);
 }
 
 // ---------------- Recording ✓ / ✗ ----------------
@@ -727,15 +839,27 @@ function currentTarget() {
 // target: captured when the pedal was pressed (so a section change during
 // the double-tap window can't steal the record); defaults to "now".
 function record(kind, target = currentTarget()) {
-	recorder.record(kind, target);
+	const entry = recorder.record(kind, target);
 	noteSectionStats(target?.practice, target?.section, kind, 1);
 	noteTotals(kind, 1);
+
+	// Song mode: every run is also an attempt in the section's log.
+	let songMsg = null;
+	const { practice: p, section: m } = target ?? {};
+	if (m && isSong(p) && p.metronomes.includes(m)) {
+		const attempt = { id: newAttemptId(), t: Date.now(), k: kind, bpm: target.bpm ?? m.startBPM };
+		entry.attemptId = attempt.id;
+		m.log = mergeLog(m.log ?? [], [attempt]);
+		noteAttempt(p, m, attempt);
+		songMsg = afterAttempt(p, m, attempt);
+	}
 	refreshStats();
 
 	const good = kind === 's';
 	strike(good ? 'success-zone' : 'fail-zone', 'is-struck', 450);
 	strike(good ? 'bar-good' : 'bar-bad', 'is-struck', 450);
-	const where = target?.section?.name ? ` · ${target.section.name}` : '';
+	if (songMsg) return toast(songMsg, '', 2200);
+	const where = m?.name ? ` · ${m.name}` : '';
 	toast(`${good ? '✓ Good run' : '✗ Bad run'}${where}`, good ? 'good' : 'bad');
 }
 
@@ -752,6 +876,11 @@ function undoLast() {
 		return;
 	}
 	if (!entry.sectionGone) noteSectionStats(entry.practice, entry.section, entry.kind, -1);
+	// Removes the attempt; a tempo change it caused stays (see docs).
+	if (entry.attemptId && !entry.sectionGone) {
+		entry.section.log = (entry.section.log ?? []).filter((a) => a.id !== entry.attemptId);
+		noteAttemptRemoved(entry.practice, entry.section, entry.attemptId);
+	}
 	noteTotals(entry.kind, -1);
 	refreshStats();
 
@@ -1033,9 +1162,10 @@ function runSection(index) {
 	}
 	activeMetIndex = index;
 	const met = activePractice.metronomes[index];
+	const ramp = met.ramp && !isSong(activePractice); // song mode plays every section at its tempo
 	sectionStartBPM = met.startBPM;
-	sectionEndBPM = met.ramp ? met.endBPM || met.startBPM : met.startBPM;
-	isRamping = Boolean(met.ramp && met.endBPM && met.endBPM !== met.startBPM);
+	sectionEndBPM = ramp ? met.endBPM || met.startBPM : met.startBPM;
+	isRamping = Boolean(ramp && met.endBPM && met.endBPM !== met.startBPM);
 	currentBPM = sectionStartBPM;
 	timeLeftInSection = met.duration;
 	totalSectionTime = met.duration;
@@ -1095,6 +1225,7 @@ function adjustBPM(amount) {
 	met.ramp = false;
 	$('bpm-unit').textContent = 'BPM';
 	savePractice(activePractice);
+	updateSongLine();
 }
 
 function togglePause() {
@@ -1118,7 +1249,9 @@ function updatePlayerUI() {
 	$('player-pos').textContent = `${activeMetIndex + 1}/${list.length}`;
 	$('label').textContent = met.name;
 	$('bpm-unit').textContent =
-		met.ramp && met.endBPM && met.endBPM !== met.startBPM ? `BPM · ramp ${met.startBPM} → ${met.endBPM}` : 'BPM';
+		met.ramp && !isSong(activePractice) && met.endBPM && met.endBPM !== met.startBPM
+			? `BPM · ramp ${met.startBPM} → ${met.endBPM}`
+			: 'BPM';
 
 	const next = list[activeMetIndex + 1] || (activePractice.loop ? list[0] : null);
 	$('upcoming-details').textContent = next
@@ -1158,6 +1291,36 @@ function updateTally() {
 		h('span', {}, 'All-time ', h('b', {}, `${formatAccuracy(totals)} of ${totals.s + totals.f}`)),
 	);
 	$('undoBtn').disabled = !canUndo();
+	updateSongLine();
+}
+
+// One line under the beats in song mode: what the next attempt is for.
+function songLineText(p, m) {
+	if (isRun(m)) return 'Run · tap ✗ and keep playing';
+	const log = m.log ?? [];
+	const today = dayKey(Date.now());
+	if (!log.some((a) => dayKey(a.t) === today)) return 'Cold attempt · first try today counts';
+	const song = songNow(p);
+	const cap = m.joined ? song.cap : song.ceiling;
+	const st = streak(log, currentBPM);
+	let step;
+	if (st.kind === 's' && currentBPM >= cap) step = `At the cap · ${cap}`;
+	else if (st.kind === 's') step = `✓ ${st.n} of 2 to go up`;
+	else if (st.kind === 'f') step = `✗ ${st.n} in a row`;
+	else step = '2 ✓ in a row to go up';
+	const b = band(log);
+	const owned = ownedTempo(log);
+	return ['Work', step, b === null ? null : `Band ${Math.round(b * 100)}%`, owned === null ? null : `Owned ${owned}`]
+		.filter(Boolean)
+		.join(' · ');
+}
+
+function updateSongLine() {
+	const el = $('song-line');
+	const m = playingSection();
+	const on = Boolean(m && isSong(activePractice));
+	el.hidden = !on;
+	if (on) el.textContent = songLineText(activePractice, m);
 }
 
 // Keep the phone screen awake while a routine plays (music-stand use).
@@ -1176,6 +1339,7 @@ document.addEventListener('visibilitychange', () => {
 function startRoutine(p) {
 	if (!p.metronomes.length) return toast('Add a section first');
 	initAudio();
+	prepareSongSession(p);
 	activePractice = p;
 	isPaused = false;
 	renderPlayButton();
