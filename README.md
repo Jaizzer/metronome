@@ -11,6 +11,7 @@ A practice metronome for guitar routines, with a foot-pedal ✓/✗ record of ev
 - **✓ / ✗ record**: every run is recorded against the current section (the playing one, or the selected one in the routine list). Per-section and per-routine totals and accuracy show in both views; the all-time total is kept separately. Undo with the Undo button, Cmd/Ctrl+Z, or a pedal hold (last 50 records).
 - **Song mode** (per routine): set a target BPM; each section is a chunk (or a Run play-through). Every ✓/✗ is logged with its tempo; 2 ✓ in a row raises the chunk's tempo, 2 ✗ suggests a smaller chunk, 4 ✗ lowers it. A tempo passed cold (first try of the day) on 2 days is *owned*; the song tempo is the lowest owned tempo among joined chunks, and each section shows its state, owned tempo and when it's due for review. Rules: `docs/PRACTICE-ALGORITHM.md`; logic: `src/engine.js`.
 - **Tab import**: **Import tab** reads a Guitar Pro (.gp, .gp3–.gp5, .gpx) or MusicXML (.musicxml, .xml, .mxl) file, or a plain-text tab (.txt or pasted), and proposes a Song-mode routine: sections from the file's markers (else 8 bars each), chunks of 2–4 bars cut at phrase ends, dense bars (many notes, mostly 16ths, legato runs) as their own 1–2 bar "likely bottleneck" chunks, a seam for every pair of neighbouring chunks, and one full run. Review it (merge, split, rename, delete, pick the track, set the target BPM), then **Create routine**. In the player, **Tab** shows the section's bars and **Hear it** plays them at the live tempo with the click paused. The tab file stays on the device (IndexedDB); another device shows "Tab file not on this device · Import again". Rules: `docs/TAB-IMPORT.md`; slicing: `src/slicer.js`.
+- **Tab player** (Guitar Pro / MusicXML routines): **Play tab** in the routine's Options, or **Open full tab** in the player's Tab disclosure, opens the whole song with alphaTab's cursor and a score that scrolls with the playback. Play/Pause, Stop (back to the selection start), speed 50–150% (shown with the BPM it equals), Count-in, Metronome and Loop sit in a bar at the bottom. Tap a bar to start there; tap a second bar (or the same one again) to select the bars between and loop them; chips select a routine chunk in one tap. **Practice this chunk** opens the player on the matching section; any other selection can be **Add as a new chunk** (asks first). Several tracks: pick the one shown, mute or solo any. Keys: Space or the pedal = play/pause (no ✓/✗ here), ← / → one bar, `[` / `]` loop start / end at the cursor, Escape = Exit. Opening it pauses the click; Exit leaves the click paused. Rules: `docs/TAB-PLAYER.md`.
 - Volume, show/hide stats and reset all-time (player **Settings**), reset per routine (**Options**), sign up with an emailed 6-digit code, sign in, sign out. Data syncs through Neon, so it follows you across devices.
 
 ## Foot pedal
@@ -22,6 +23,8 @@ The pedal must send the **Enter** key.
 | Tap | ✓ good run (recorded when the 600 ms double-tap window ends; a "Pending…" dot shows meanwhile) |
 | Double-tap | ✗ bad run (recorded at once; further taps in the same window are ignored) |
 | Hold ≥ 0.8 s | Undo the last record (a tap followed by a hold just cancels that tap) |
+
+In the **Tab player** the pedal plays and pauses the tab instead (nothing is recorded there).
 
 A record goes to the section that was current when the pedal went down, even if the section changes during the window. Undo (button or Cmd/Ctrl+Z) during the window cancels the pending ✓. Key auto-repeat is ignored. The pedal does nothing while a dialog is open or while focus is on a button, link, or field (there Enter keeps its normal meaning); mouse clicks and finished edits hand focus back so the pedal keeps working. Timings are `DOUBLE_TAP_MS` and `HOLD_MS` in `src/pedal.js`.
 
@@ -65,7 +68,7 @@ So in production the browser talks to **`/api/auth/*` on the app's own domain**.
 cp .env.example .env   # public Neon endpoints
 npm install
 npm run dev            # http://localhost:5173 (must be this port: Neon trusts it)
-npm test               # pedal, records, sync, song-engine and tab-import unit tests
+npm test               # pedal, records, sync, song-engine, tab-import and tab-player unit tests
 node test/fixtures/make-fixtures.mjs   # rebuild the tab fixtures (hand-made MusicXML, its .gp export)
 ```
 
@@ -83,13 +86,13 @@ The old GitHub Pages site serves the unbuilt source and doesn't work; use the Ve
 
 ## Third-party: alphaTab
 
-Tab reading, drawing and playback use [alphaTab](https://alphatab.net) 1.9.0 (MPL-2.0; its source and licence ship in `node_modules/@coderline/alphatab`), loaded only when the import screen or a Tab view needs it, in its own chunk. Its code is MPL-2.0. Separately, alphaTab's notice asks that the "♪ alphaTab.net" credit it draws in longer scores stays visible (hiding it needs the maintainers' permission, see https://alphatab.net/docs/attribution); the app never hides it. It bundles the Bravura font (SIL OFL 1.1) and the SONiVOX soundfont used by Hear it. `@coderline/alphatab-vite` wires its worker into the build (it needs Vite 6+).
+Tab reading, drawing and playback use [alphaTab](https://alphatab.net) 1.9.0 (MPL-2.0; its source and licence ship in `node_modules/@coderline/alphatab`), loaded only when the import screen, a Tab view or the Tab player needs it, in its own chunk. Its code is MPL-2.0. Separately, alphaTab's notice asks that the "♪ alphaTab.net" credit it draws in longer scores stays visible (hiding it needs the maintainers' permission, see https://alphatab.net/docs/attribution); the app never hides it. It bundles the Bravura font (SIL OFL 1.1) and the SONiVOX soundfont used by Hear it and the Tab player (fetched once per session, shared). `@coderline/alphatab-vite` wires its worker into the build (it needs Vite 6+).
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `index.html` | Markup for the four views (sign in, verify, routines, player) |
+| `index.html` | Markup for the views (sign in, verify, routines, player, import, Tab player shell) |
 | `src/main.js` | UI, audio engine, player, recording, saving |
 | `src/pedal.js` | Pedal gesture timing (tap / double-tap / hold) |
 | `src/records.js` | ✓/✗ tallies and the undo stack |
@@ -100,6 +103,8 @@ Tab reading, drawing and playback use [alphaTab](https://alphatab.net) 1.9.0 (MP
 | `src/tabstore.js` | IndexedDB store for tab files (per routine) + re-attach check |
 | `src/tabload.js`, `src/tabview.js` | Lazy loading of alphaTab; `tabview.js` is the only module that imports it (parse, draw, Hear it) |
 | `src/importer.js`, `src/tabpanel.js` | Import view + review; the player's Tab disclosure |
+| `src/tabplayer.js`, `src/tabplayer.css` | The full-song Tab player (lazy chunk, with its own styles) |
+| `src/tabplayerlogic.js` | Tab player rules: bar taps → selection, loop ends, speed, chunk matching, keys; pure |
 | `src/dom.js` | The `h()` element builder shared by the modules |
 | `src/db.js` | All Neon calls (auth + Data API) |
 | `src/style.css`, `src/icons.js` | Styles and the SVG icon set; tokens in `DESIGN.md` |
