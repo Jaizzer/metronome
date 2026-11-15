@@ -15,6 +15,10 @@ import {
 	chunkStatus,
 	sessionStart,
 	dayKey,
+	coldAttempts,
+	coldThreshold,
+	nextStep,
+	previousTop,
 	LOG_CAP,
 } from '../src/engine.js';
 
@@ -77,13 +81,17 @@ test('ladder steps are bigger above a 90% band', () => {
 	assert.deepEqual(ladder(log, 100), { action: 'up', to: 105 });
 });
 
-test('owned tempo = cold first attempt passed on 2 separate days', () => {
-	const log = [at(0, 's', 80, 0), at(0, 's', 90, 5), at(1, 'f', 84, 0), at(1, 's', 90, 9)];
-	assert.equal(ownedTempo(log), null); // only day 0's cold attempt passed
-	log.push(at(2, 's', 82, 0));
-	assert.equal(ownedTempo(log), 80); // 2 days: cold ✓ at 80 and 82 → owned 80
-	log.push(at(3, 's', 86, 0));
-	assert.equal(ownedTempo(log), 82);
+test('owned tempo = cold check passed on 2 separate days; slower warm-ups don’t count', () => {
+	const log = [at(0, 's', 80, 0), at(0, 's', 90, 5), at(1, 'f', 84, 0), at(1, 'f', 90, 1), at(1, 's', 90, 9)];
+	// day 1: 84 < stepDown(90) = 86 is a warm-up; the cold check is the ✗ at 90
+	assert.deepEqual(coldAttempts(log).map((c) => [c.k, c.bpm]), [['s', 80], ['f', 90]]);
+	assert.equal(ownedTempo(log), null);
+	log.push(at(2, 's', 88, 0)); // ≥ stepDown(90): counts
+	assert.equal(ownedTempo(log), 80);
+	log.push(at(3, 's', 92, 0));
+	assert.equal(ownedTempo(log), 88);
+	assert.equal(coldThreshold(log, dayKey(T0 + 4 * DAY)), stepDown(92));
+	assert.equal(coldAttempts([at(0, 'f', 50, 0), at(0, 's', 60, 1)])[0].bpm, 50); // first day: first attempt
 });
 
 test('reviews spread out after passed cold checks and reset after a miss', () => {
@@ -116,8 +124,8 @@ test('song tempo = lowest owned joined chunk; joining and caps', () => {
 	c.log = owns(72);
 	assert.equal(shouldJoin(c, song), true);
 	assert.equal(shouldJoin(run, song), false);
-	assert.equal(sessionStart(a, song), 77); // owned 80, capped at song +10%
-	assert.equal(sessionStart({ startBPM: 64, log: [] }, song), 64);
+	assert.equal(sessionStart(a, song, T0 + 2 * DAY), 77); // yesterday's top 80, capped at song +10%
+	assert.equal(sessionStart({ startBPM: 64, log: [] }, song, T0), 64);
 	const first = songState([{ joined: false, log: owns(60) }], 120);
 	assert.equal(first.tempo, null);
 	assert.equal(shouldJoin({ log: owns(60) }, first), true);
@@ -131,4 +139,61 @@ test('chunk status flags due reviews and the bottleneck', () => {
 	assert.equal(st.owned, 70);
 	assert.equal(st.due, true);
 	assert.equal(chunkStatus(b, song, T0 + 2 * DAY).due, false);
+});
+
+test('plateau counts ✗-only days as no new top', () => {
+	const log = [at(0, 's', 90), at(1, 'f', 95), at(2, 'f', 95), at(3, 's', 88)];
+	assert.equal(plateau(log), true);
+});
+
+test('runs are never due', () => {
+	const run = { kind: 'run', log: [at(0, 's', 70), at(1, 's', 70)] };
+	const st = chunkStatus(run, songState([run], 100), T0 + 10 * DAY);
+	assert.equal(st.due, false);
+	assert.equal(st.review, null);
+});
+
+// Drives the engine the way main.js does: start each day at sessionStart,
+// play the attempts, apply nextStep after each (tempo + join).
+function simulate(days, perDay, { coldFailDay = -1 } = {}) {
+	const m = { name: 'A', startBPM: 70, log: [] };
+	const sections = [m];
+	const out = [];
+	for (let d = 0; d < days; d++) {
+		const now = T0 + d * DAY;
+		m.startBPM = m.log.length ? sessionStart(m, songState(sections, 120), now) : m.startBPM;
+		const probe = m.startBPM;
+		for (let i = 0; i < perDay; i++) {
+			const a = { id: `s${d}-${i}`, t: now + i * 60000, k: d === coldFailDay && i === 0 ? 'f' : 's', bpm: m.startBPM };
+			m.log.push(a);
+			const r = nextStep(m, sections, 120, a);
+			if (r.action === 'up' || r.action === 'down' || r.action === 'cold-miss') m.startBPM = r.to;
+			if (r.join) m.joined = true;
+			if (i === 0) out.push({ day: d, probe, afterCold: m.startBPM, action: r.action });
+		}
+		Object.assign(out[out.length - 1], { owned: ownedTempo(m.log), song: songState(sections, 120).tempo, top: previousTop(m.log, dayKey(now + DAY)) });
+	}
+	return out;
+}
+
+test('10 clean days: owned tempo and song tempo rise every day', () => {
+	const days = simulate(10, 6);
+	assert.equal(days[0].owned, null);
+	assert.equal(days[1].owned, 70); // 2 cold passes: day 0 at 70, day 1 at day 0's top
+	for (let d = 2; d < 10; d++) {
+		assert.ok(days[d].owned > days[d - 1].owned, `owned rises on day ${d}: ${days[d - 1].owned} → ${days[d].owned}`);
+		assert.ok(days[d].song > days[d - 1].song, `song tempo rises on day ${d}`);
+		assert.equal(days[d].probe, Math.min(days[d - 1].top, 132)); // cold check at yesterday's top ✓
+	}
+	assert.ok(days[9].owned < 132);
+});
+
+test('a failed cold check drops to max(owned, stepDown(probe)) and owned holds', () => {
+	const clean = simulate(7, 6);
+	const miss = simulate(7, 6, { coldFailDay: 6 });
+	const day = miss[6];
+	assert.equal(day.action, 'cold-miss');
+	assert.equal(day.afterCold, Math.max(clean[5].owned, stepDown(day.probe)));
+	assert.equal(day.owned, miss[5].owned); // a missed check doesn't raise it
+	assert.ok(clean[6].owned > miss[6].owned);
 });

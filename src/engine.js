@@ -94,17 +94,56 @@ export function streak(log, bpm) {
 	return { kind, n };
 }
 
-// First attempt of each day = the cold attempt.
-export function coldAttempts(log) {
-	const seen = new Set();
-	const out = [];
+// Attempts grouped by local day, oldest day first: [{ day, list, top }].
+// top = highest tempo with a ✓ that day (0 if the day had none).
+export function practiceDays(log) {
+	const days = new Map();
 	for (const a of log) {
 		const d = dayKey(a.t);
-		if (seen.has(d)) continue;
-		seen.add(d);
-		out.push({ ...a, day: d });
+		if (!days.has(d)) days.set(d, { day: d, list: [], top: 0 });
+		const e = days.get(d);
+		e.list.push(a);
+		if (a.k === 's') e.top = Math.max(e.top, a.bpm);
+	}
+	return [...days.values()];
+}
+
+// Top ✓ tempo of the last practice day before `today` (0 if that day had
+// no ✓), or null when there is no earlier day.
+export function previousTop(log, today = dayKey(Date.now())) {
+	const before = practiceDays(log).filter((d) => d.day < today);
+	return before.length ? before[before.length - 1].top : null;
+}
+
+// The day's cold check: its first attempt at or above stepDown(previous
+// practice day's top ✓). Slower attempts before it are warm-ups. With no
+// earlier ✓ (first day, or an all-✗ day before), the first attempt counts.
+export function coldAttempts(log) {
+	const out = [];
+	let prevTop = 0;
+	for (const { day, list, top } of practiceDays(log)) {
+		const min = prevTop ? stepDown(prevTop) : 0;
+		const c = list.find((a) => a.bpm >= min);
+		if (c) out.push({ ...c, day });
+		prevTop = top;
 	}
 	return out;
+}
+
+// Lowest tempo that counts as today's cold check (null: any tempo does).
+export function coldThreshold(log, today = dayKey(Date.now())) {
+	const top = previousTop(log, today);
+	return top ? stepDown(top) : null;
+}
+
+export function isColdAttempt(log, attempt) {
+	return coldAttempts(log).some((c) => c.id === attempt.id);
+}
+
+// Has today's cold check been played yet?
+export function coldDoneToday(log, now = Date.now()) {
+	const today = dayKey(now);
+	return coldAttempts(log).some((c) => c.day === today);
 }
 
 // Highest tempo whose cold attempt passed on 2 separate days, or null.
@@ -129,15 +168,9 @@ export function nextReview(log) {
 	return addDays(last.day, gap);
 }
 
-// Top tempo with a ✓ per practice day, newest last.
+// Top ✓ tempo per practice day, newest last; a day with only ✗ has top 0.
 function sessionTops(log) {
-	const tops = new Map();
-	for (const a of log) {
-		if (a.k !== 's') continue;
-		const d = dayKey(a.t);
-		tops.set(d, Math.max(tops.get(d) ?? 0, a.bpm));
-	}
-	return [...tops.values()];
+	return practiceDays(log).map((d) => d.top);
 }
 
 // No new top tempo in the last PLATEAU_SESSIONS practice days.
@@ -194,28 +227,51 @@ export function shouldJoin(section, song) {
 export function chunkStatus(section, song, now = Date.now()) {
 	const log = section.log ?? [];
 	const today = dayKey(now);
+	const run = (section.kind ?? 'chunk') === 'run';
 	const owned = ownedTempo(log);
-	const review = nextReview(log);
-	const playedToday = log.some((a) => dayKey(a.t) === today);
+	const review = run ? null : nextReview(log); // runs are never due
 	let state = 'new';
-	if ((section.kind ?? 'chunk') === 'run') state = 'run';
+	if (run) state = 'run';
 	else if (section.joined) state = song.bottleneck === section ? 'bottleneck' : 'joined';
 	return {
 		state,
 		owned,
 		band: band(log),
-		due: review !== null && review <= today && !playedToday,
+		due: review !== null && review <= today && !coldDoneToday(log, now),
 		review,
 		plateau: plateau(log),
 		attempts: log.length,
 	};
 }
 
-// Tempo a chunk starts today's session at: its owned tempo (warm-up below
-// is fine), capped; or its current tempo if nothing is owned yet.
-export function sessionStart(section, song) {
-	const o = ownedTempo(section.log ?? []);
-	const cap = section.joined ? song.cap : song.ceiling;
-	const start = o ?? section.startBPM;
-	return Math.min(start, cap);
+const capFor = (section, song) => (section.joined ? song.cap : song.ceiling);
+
+// The tempo today's cold check is played at (the probe): the previous
+// practice day's top ✓ tempo, capped. Falls back to the owned tempo, then
+// the chunk's current tempo. Owned tempo then rises with a one-day lag.
+export function sessionStart(section, song, now = Date.now()) {
+	const log = section.log ?? [];
+	const start = previousTop(log, dayKey(now)) || ownedTempo(log) || section.startBPM;
+	return Math.min(start, capFor(section, song));
+}
+
+// Everything that follows one attempt on a section (the calls main.js
+// makes after each ✓/✗). `section.log` must already include `attempt`.
+//   action: 'up' | 'down' | 'shrink' | 'cold-miss' | null, to: new tempo
+//   join: true when the chunk should be marked joined now
+// Cold ✓ keeps climbing through the ladder; a cold ✗ drops the working
+// tempo to max(owned, stepDown(probe)).
+export function nextStep(section, sections, target, attempt) {
+	if ((section.kind ?? 'chunk') === 'run') return { action: null, to: attempt.bpm, join: false };
+	const log = section.log ?? [];
+	const song = songState(sections, target);
+	const cap = capFor(section, song);
+	let r;
+	if (attempt.k === 'f' && isColdAttempt(log, attempt)) {
+		const to = Math.min(cap, Math.max(ownedTempo(log) ?? MIN_BPM, stepDown(attempt.bpm)));
+		r = to === attempt.bpm ? { action: null, to } : { action: 'cold-miss', to };
+	} else {
+		r = ladder(log, attempt.bpm, cap);
+	}
+	return { ...r, join: shouldJoin(section, song) };
 }
