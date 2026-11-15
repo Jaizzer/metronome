@@ -1682,7 +1682,10 @@ function toggleSection(li, m) {
 // The row's tempo: "60", or "60→80" with a small arrow when it ramps.
 function fillTempo(el, m, song) {
 	const ramps = !song && m.ramp && m.endBPM && m.endBPM !== m.startBPM;
-	el.replaceChildren(String(m.startBPM), ...(ramps ? [h('i', { 'aria-label': ' to ' }, '→'), String(m.endBPM)] : []));
+	el.replaceChildren(
+		String(m.startBPM),
+		...(ramps ? [h('i', { 'aria-hidden': 'true' }, '→'), h('span', { class: 'sr-only' }, ' to '), String(m.endBPM)] : []),
+	);
 }
 
 function bpmInput(props) {
