@@ -14,7 +14,7 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Harness check (screenshots 390/1280, scripted flow), docs (README, DESIGN)
 - [x] Deploy check (Vercel production + 200)
 - [x] Review round 1: probe-tempo cold checks (owned tempo keeps rising), warm-ups don't count, runs never due, settings from the first section that has them, `joined` one-way in sync, plateau counts ✗-only days, Chunk | Run inside the disclosure, due names in the summary, new-day start on load/day change, plainer 22–24px player line
-- [ ] Round 1 deploy check
+- [x] Round 1 deploy check
 
 **Built (phase 1)**
 - Song mode per routine (switch in the routine head), stored as `song: { on, target }` on every section; sections carry `kind` ('chunk' | 'run'), `joined` and `log` (attempts `{ id, t, k, bpm }`, newest 400 kept). No schema change.
