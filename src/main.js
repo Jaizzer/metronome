@@ -32,6 +32,11 @@ import { createPedal } from './pedal.js';
 import { createRecorder, sectionStats, routineStats, formatAccuracy } from './records.js';
 import { createSync, ensureSectionIds, newSectionId, reconcileSections } from './sync.js';
 import { icons } from './icons.js';
+import { h, iconEl } from './dom.js';
+import { createImporter } from './importer.js';
+import { createTabPanel } from './tabpanel.js';
+import { saveTab, deleteTab, tabRecord } from './tabstore.js';
+import { barRange } from './slicer.js';
 import {
 	newAttemptId,
 	mergeLog,
@@ -48,26 +53,7 @@ import {
 
 const $ = (id) => document.getElementById(id);
 
-// Tiny element builder: h('button', { class: 'btn', onclick }, 'Label').
-// Strings become text nodes, so user content is never parsed as HTML.
-function h(tag, props = {}, ...children) {
-	const el = document.createElement(tag);
-	for (const [k, v] of Object.entries(props)) {
-		if (v === undefined || v === null || v === false) continue;
-		if (k === 'class') el.className = v;
-		else if (k === 'html') el.innerHTML = v; // only ever our own icon markup
-		else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-		else if (k in el && typeof v !== 'string') el[k] = v;
-		else el.setAttribute(k, v === true ? '' : v);
-	}
-	for (const c of children.flat()) {
-		if (c === null || c === undefined || c === false) continue;
-		el.append(c instanceof Node ? c : document.createTextNode(String(c)));
-	}
-	return el;
-}
-
-const iconEl = (name) => h('span', { html: icons[name], style: 'display:contents' });
+// h() and iconEl() live in dom.js (shared with the tab import modules).
 
 // ---------------- State ----------------
 
@@ -478,7 +464,7 @@ window.addEventListener('online', () => scheduleCountFlushes(0));
 
 // ---------------- Views + toast ----------------
 
-const VIEWS = ['auth', 'verify', 'builder', 'player'];
+const VIEWS = ['auth', 'verify', 'builder', 'player', 'importer'];
 let view = 'auth';
 
 function showView(name) {
@@ -987,6 +973,11 @@ function isInteractiveTarget(el) {
 
 window.addEventListener('keydown', (e) => {
 	if (!currentSession || $('modal').open) return;
+	// The import screen is a form: Enter keeps its normal meaning, Escape leaves.
+	if (view === 'importer') {
+		if (e.key === 'Escape' && !e.target.closest?.('details[open] textarea')) importer.close();
+		return;
+	}
 
 	// Foot pedal (sends Enter). Handled on keydown + keyup in pedal.js.
 	if (e.key === 'Enter') {
@@ -1258,6 +1249,7 @@ function adjustBPM(amount) {
 
 function togglePause() {
 	isPaused = !isPaused;
+	if (!isPaused) tabPanel.stop(); // the click and "Hear it" never play together
 	if (!isPaused && audioCtx) nextTickTime = audioCtx.currentTime + 0.05; // no catch-up burst
 	renderPlayButton();
 	if (isPaused) lightUpDot(-1);
@@ -1286,6 +1278,7 @@ function updatePlayerUI() {
 		? `Next: ${next.name} · ${next.startBPM} BPM · ${formatClock(next.duration)}${list[activeMetIndex + 1] ? '' : ' (loop)'}`
 		: 'Last section';
 	$('prevBtn').disabled = activeMetIndex === 0;
+	tabPanel.update(activePractice, met);
 
 	$('stops').replaceChildren(
 		...list.map((m, i) =>
@@ -1379,6 +1372,7 @@ function startRoutine(p) {
 }
 
 function stopEverything({ finished = false } = {}) {
+	tabPanel.close();
 	isPaused = false;
 	clearInterval(schedulerInterval);
 	clearInterval(countdownInterval);
@@ -1647,6 +1641,10 @@ const songRowStatus = (cs) => [STATE_LABEL[cs.state], cs.due && 'Due today'].fil
 // plateau advice, and the Chunk | Run choice.
 function songDetailsEl(p, m, cs) {
 	const facts = [];
+	if (Array.isArray(m.bars)) {
+		const r = barRange(m.bars[0], m.bars[1]);
+		facts.push(`${m.seam ? 'Seam, ' + r : r[0].toUpperCase() + r.slice(1)}${m.dense ? ' · likely bottleneck' : ''}`);
+	}
 	if (cs.state !== 'run') facts.push(cs.owned === null ? 'Owned –' : `Owned ${cs.owned} BPM`);
 	facts.push(cs.band === null ? 'Band –' : `Band ${Math.round(cs.band * 100)}%`);
 	const review = cs.state === 'run' || cs.due ? null : cs.review ? `Next review ${shortDate(cs.review)}` : 'Review starts once owned';
@@ -2167,7 +2165,12 @@ function renderBuilder({ keepFocus = false } = {}) {
 				{ class: 'empty' },
 				h('span', { class: 'empty-art', html: icons.metronome }),
 				h('p', {}, 'No routines yet. A routine is a list of timed sections, each with its own tempo.'),
-				h('button', { class: 'btn btn-primary', type: 'button', onclick: addRoutine }, 'Create your first routine'),
+				h(
+					'div',
+					{ class: 'empty-actions' },
+					h('button', { class: 'btn btn-primary', type: 'button', onclick: addRoutine }, 'Create your first routine'),
+					h('button', { class: 'btn', type: 'button', id: 'importTabEmpty', onclick: () => importer.open() }, iconEl('importFile'), 'Import tab'),
+				),
 			),
 		);
 	} else {
@@ -2271,6 +2274,10 @@ function openDeleteDialog(p) {
 		onConfirm: async () => {
 			removeLocalPractice(p);
 			renderBuilder();
+			if (p.id) {
+				deleteTab(p.id).catch(() => {}); // the tab file stored on this device
+				tabPanel.forget(p.id);
+			}
 			if (p.id) await withSync(deletePractice(p.id)).catch(() => {});
 		},
 	});
@@ -2298,6 +2305,67 @@ async function addRoutine() {
 		// withSync already reported it
 	}
 }
+
+// ---------------- Tab import (docs/TAB-IMPORT.md) ----------------
+
+// A reviewed import becomes a routine through the same insert path as
+// New routine; the tab file itself is kept on this device (IndexedDB).
+async function createImportedRoutine(draft, source) {
+	const created = await withSync(insertPractice({ ...draft, loop: false, position: practices.length }));
+	const p = { ...created, metronomes: created.metronomes ?? [] };
+	ensureSectionIds(p.metronomes);
+	practices.push(p);
+	let stored = true;
+	try {
+		await saveTab(tabRecord({ routineId: p.id, fileName: source.fileName, format: source.format, data: source.data, track: source.track, title: source.title, bars: source.bars }));
+		tabPanel.remember(p.id, source);
+	} catch (e) {
+		console.error('Tab file not stored:', e);
+		stored = false;
+	}
+	prepareSongSession(p);
+	selectSection(p, p.metronomes[0]);
+	slideIndex = practices.length - 1;
+	showView('builder');
+	renderBuilder();
+	document.querySelector(`#app > .routine[data-pidx="${practices.length - 1}"]`)?.scrollIntoView({ block: 'start' });
+	toast(
+		stored ? `Routine created · ${p.metronomes.length} sections` : 'Routine created · the tab file couldn’t be kept on this device',
+		stored ? '' : 'error',
+		stored ? 2200 : 4000,
+	);
+	return p;
+}
+
+const importer = createImporter({
+	toast,
+	makeId: newSectionId,
+	show: () => showView('importer'),
+	close: () => {
+		showView('builder');
+		renderBuilder();
+	},
+	create: createImportedRoutine,
+});
+
+const tabPanel = createTabPanel({
+	toast,
+	liveBpm: () => currentBPM,
+	// "Hear it" pauses the click and resumes it afterwards (if it was running).
+	pauseClick: () => {
+		if (isPaused || view !== 'player') return false;
+		togglePause();
+		return true;
+	},
+	resumeClick: () => {
+		if (isPaused && view === 'player') togglePause();
+	},
+});
+
+$('importTabBtn').onclick = () => importer.open();
+$('importTabBtn').replaceChildren(iconEl('importFile'), 'Import tab');
+$('import-cancel').onclick = () => importer.close();
+$('import-cancel').replaceChildren(iconEl('back'), 'Cancel');
 
 $('addPracticeBtn').onclick = addRoutine;
 $('addPracticeTop').onclick = addRoutine;

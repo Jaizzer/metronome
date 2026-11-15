@@ -69,6 +69,7 @@
 						<button id="view-list" class="seg-btn" type="button" aria-pressed="true">List</button>
 						<button id="view-slide" class="seg-btn" type="button" aria-pressed="false">Slide</button>
 					</div>
+					<button id="importTabBtn" class="btn import-btn" type="button">Import tab</button>
 					<button id="addPracticeTop" class="btn btn-icon" type="button" aria-label="New routine" title="New routine"></button>
 				</div>
 			</div>
@@ -120,6 +121,11 @@
 				<p id="song-line" class="song-line" aria-live="polite" hidden></p>
 			</div>
 
+			<details id="tab-panel" class="tab-panel" hidden>
+				<summary id="tab-summary">Tab</summary>
+				<div id="tab-body" class="tab-body"></div>
+			</details>
+
 			<div class="time">
 				<span id="remaining" class="remaining">0:00</span>
 				<div class="progress" aria-hidden="true">
@@ -169,6 +175,16 @@
 				</div>
 			</details>
 		</div>
+	</section>
+
+	<!-- ───────────── Import tab ───────────── -->
+	<section id="importer" class="importer" hidden>
+		<header class="player-top">
+			<button id="import-cancel" class="btn btn-quiet" type="button">Cancel</button>
+			<h1 id="import-title" class="player-title" tabindex="-1">Import tab</h1>
+			<span class="player-pos" aria-hidden="true"></span>
+		</header>
+		<div id="import-main" class="import-main"></div>
 	</section>
 
 	<dialog id="modal" aria-labelledby="modal-title">

@@ -89,7 +89,9 @@ button:focus,
 }
 
 button,
-input {
+input,
+select,
+textarea {
 	font: inherit;
 	color: inherit;
 }
@@ -1535,9 +1537,13 @@ input[type='range']:focus-visible {
 		grid-template-areas:
 			'stops stops'
 			'tempo tally'
-			'time tally'
-			'transport tally'
+			'time tab'
+			'transport tab'
+			'. tab'
 			'settings settings';
+		/* The Tab panel (right column) can be tall: its extra height goes to
+		   the flexible 5th row, not between the clock and the transport. */
+		grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
 		column-gap: var(--s7);
 		align-content: start;
 	}
@@ -1562,6 +1568,11 @@ input[type='range']:focus-visible {
 	}
 	.player-more {
 		grid-area: settings;
+	}
+	.tab-panel {
+		grid-area: tab;
+		align-self: start;
+		margin-top: 0;
 	}
 }
 
@@ -1908,6 +1919,328 @@ dialog p {
 	min-height: 44px;
 }
 
+/* ---------- Tab import (docs/TAB-IMPORT.md) ---------- */
+
+.empty-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: var(--s2);
+}
+
+.importer {
+	min-height: 100dvh;
+	display: flex;
+	flex-direction: column;
+}
+
+.import-main {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	max-width: 640px;
+	margin: 0 auto;
+	padding: var(--s4) var(--gutter) 0;
+}
+
+.import-choose {
+	display: grid;
+	gap: var(--s3);
+	padding-bottom: var(--s6);
+}
+
+.import-lede,
+.import-hint,
+.import-summary,
+.import-error,
+.tab-note {
+	margin: 0;
+	font-size: 14px;
+	color: var(--paper-2);
+}
+
+.import-lede {
+	font-size: 16px;
+}
+
+.import-summary {
+	color: var(--paper);
+}
+
+.import-types {
+	margin: 0;
+	text-align: center;
+	font-size: 13px;
+	color: var(--paper-3);
+}
+
+.import-status {
+	margin: 0;
+	padding: var(--s6) 0;
+	text-align: center;
+	color: var(--paper-2);
+}
+
+.import-paste,
+.tab-panel {
+	border-top: 1px solid var(--rule);
+}
+
+.import-paste summary,
+.tab-panel summary {
+	display: flex;
+	align-items: center;
+	gap: var(--s2);
+	min-height: 48px;
+	cursor: pointer;
+	list-style: none;
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--paper-2);
+}
+
+.import-paste summary::-webkit-details-marker,
+.tab-panel summary::-webkit-details-marker {
+	display: none;
+}
+
+.import-paste summary::after,
+.tab-panel summary::after {
+	content: '';
+	width: 8px;
+	height: 8px;
+	margin-left: var(--s1);
+	border-right: 2px solid var(--paper-3);
+	border-bottom: 2px solid var(--paper-3);
+	transform: rotate(45deg) translate(-2px, -2px);
+}
+
+.import-paste[open] summary::after,
+.tab-panel[open] summary::after {
+	transform: rotate(225deg) translate(-2px, -2px);
+}
+
+.import-paste summary svg.icon,
+.tab-panel summary svg.icon {
+	width: 18px;
+	height: 18px;
+}
+
+.import-paste-body {
+	display: grid;
+	gap: var(--s2);
+	padding-bottom: var(--s3);
+}
+
+.paste-area {
+	width: 100%;
+	min-height: 160px;
+	padding: var(--s2) var(--s3);
+	border-radius: var(--radius);
+	border: 2px solid var(--rule);
+	background: var(--stock-input);
+	color: var(--paper);
+	caret-color: var(--amber);
+	font: 14px/1.3 ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+	white-space: pre;
+	overflow-x: auto;
+	resize: vertical;
+}
+
+.paste-area:focus-visible,
+.import-review select:focus-visible {
+	outline: none;
+	border-color: var(--amber);
+}
+
+.import-paste-body .btn {
+	justify-self: start;
+}
+
+.import-review {
+	display: grid;
+	gap: var(--s3);
+	padding-bottom: var(--s5);
+}
+
+.import-review select {
+	width: 100%;
+	min-height: 44px;
+	padding: 0 var(--s3);
+	border-radius: var(--radius);
+	border: 2px solid var(--rule);
+	background: var(--stock-input);
+	color: var(--paper);
+	font-size: 16px;
+}
+
+.field-bpm input {
+	max-width: 140px;
+	font-family: var(--font-num);
+	font-size: 26px;
+	font-weight: 600;
+}
+
+.chunk-list {
+	list-style: none;
+	margin: var(--s2) 0 0;
+	padding: 0;
+	border-top: 1px solid var(--rule);
+}
+
+.chunk {
+	border-bottom: 1px solid var(--rule);
+}
+
+.chunk.is-open {
+	background: var(--stock-raised);
+	border-radius: var(--radius);
+	border-bottom-color: transparent;
+}
+
+.chunk-open {
+	display: flex;
+	align-items: center;
+	gap: var(--s3);
+	width: 100%;
+	min-height: 60px;
+	padding: var(--s2) var(--s3);
+	border: 0;
+	background: none;
+	text-align: left;
+}
+
+.chunk-main {
+	flex: 1;
+	min-width: 0;
+	display: grid;
+	gap: 2px;
+}
+
+.chunk-name {
+	font-weight: 600;
+	overflow-wrap: anywhere;
+}
+
+.chunk-meta {
+	font-size: 13px;
+	color: var(--paper-2);
+}
+
+.chunk-flag {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--paper);
+}
+
+.chunk.is-open .chev {
+	transform: rotate(225deg) translate(-2px, -2px);
+}
+
+.chunk-panel {
+	display: grid;
+	gap: var(--s3);
+	padding: 0 var(--s3) var(--s3);
+}
+
+.chunk-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--s1) var(--s2);
+}
+
+.chunk-actions .btn {
+	padding: 0 var(--s3);
+}
+
+.chunk-preview {
+	min-height: 48px;
+	overflow-x: auto;
+}
+
+.import-bar {
+	position: sticky;
+	bottom: 0;
+	margin: auto calc(-1 * var(--gutter)) 0;
+	padding: var(--s3) var(--gutter) max(var(--s3), env(safe-area-inset-bottom));
+	background: var(--stock-raised);
+	border-top: 2px solid var(--rule);
+}
+
+.import-bar-inner {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--s2);
+}
+
+.import-bar .btn-primary {
+	flex: 1;
+}
+
+/* The player's Tab disclosure (closed by default, remembered per device). */
+.tab-panel {
+	justify-self: stretch;
+	width: 100%;
+	max-width: 640px;
+	margin: 0 auto;
+	text-align: left;
+	border-bottom: 1px solid var(--rule);
+}
+
+.tab-body {
+	display: grid;
+	gap: var(--s2);
+	padding-bottom: var(--s3);
+}
+
+.tab-tools,
+.tab-missing {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--s2) var(--s3);
+}
+
+.tab-missing p {
+	margin: 0;
+	flex: 1 1 180px;
+	color: var(--paper-2);
+}
+
+.tab-status {
+	font-size: 14px;
+	color: var(--paper-2);
+}
+
+.tab-render {
+	width: 100%;
+	min-height: 48px;
+	overflow-x: auto;
+}
+
+.tab-text {
+	margin: 0 0 var(--s2);
+	font: 14px/1.25 ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+	color: var(--paper);
+	white-space: pre;
+}
+
+/* alphaTab's playback cursor, in the spot ink. */
+.at-cursor-bar {
+	background: rgb(255 178 36 / 0.1);
+}
+
+.at-cursor-beat {
+	width: 3px;
+	background: var(--amber);
+}
+
+.at-highlight * {
+	fill: var(--amber);
+	stroke: var(--amber);
+}
+
 /* ---------- Phones ---------- */
 
 @media (max-width: 560px) {
@@ -1917,6 +2250,20 @@ dialog p {
 
 	.builder-head h1 {
 		font-size: 30px;
+	}
+
+	/* Routines | List·Slide on one line would leave no room for Import tab and +. */
+	.builder-head {
+		flex-wrap: wrap;
+		row-gap: var(--s3);
+	}
+
+	.head-tools {
+		flex: 1 1 100%;
+	}
+
+	.head-tools .import-btn {
+		margin-left: auto;
 	}
 
 	.seg-btn {

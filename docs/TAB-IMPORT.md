@@ -10,10 +10,10 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] `src/tabscore.js` (alphaTab score → bar list, tracks, tick ranges) + `test/tabscore.test.js` on the fixtures
 - [x] `src/tabstore.js` (IndexedDB per routine, re-attach check) + `test/tabstore.test.js`
 - [x] Fixtures: `test/fixtures/etude.musicxml` (hand-made), `etude.gp` (exported by alphaTab), `riff.txt`; `make-fixtures.mjs`
-- [ ] Lazy alphaTab module (`src/tabview.js`): parse, render a bar range, reference playback
-- [ ] Import entry points (builder head + empty state), import view, review screen, Create routine
-- [ ] Player: Tab disclosure, Hear it (pauses the click), "not on this device" + re-attach
-- [ ] Harness flows (MusicXML + text), screenshots 390/1280, pedal focus checks, old harness scripts
+- [x] Lazy alphaTab module (`src/tabview.js`, loaded only through `src/tabload.js`): parse, render a bar range, reference playback over a tick range
+- [x] Import entry points (builder head + empty state), import view, review screen (`src/importer.js`), Create routine
+- [x] Player: Tab disclosure (`src/tabpanel.js`), Hear it (pauses the click), "not on this device" + re-attach
+- [x] Harness flows (MusicXML + text + paste + bad file), screenshots 390/1280, pedal focus checks, old harness scripts
 - [ ] README, DESIGN.md, deploy check
 
 Owner approved. Build after Song mode (phase 1) and the UI simplification (phase 2).
