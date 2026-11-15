@@ -1022,11 +1022,13 @@ window.addEventListener('blur', () => pedal.cancelPress());
 
 // A mouse/touch click leaves focus on the button (or a <details> summary),
 // which would swallow the next pedal press (Enter would re-click it) or
-// Space. Keyboard clicks (detail 0) keep focus where it is.
+// Space. If the click re-drew the builder (Loop, Song mode, Ramp, Chunk |
+// Run), the clicked button is gone and keepFocus has focused its new copy:
+// blur that too. Keyboard clicks (detail 0) keep focus where it is.
 document.addEventListener('click', (e) => {
 	if (e.detail === 0) return;
 	const btn = e.target.closest?.('button, summary, [role=button], [role=switch]');
-	if (btn && document.activeElement === btn) btn.blur();
+	if (btn && (document.activeElement === btn || !btn.isConnected)) document.activeElement?.blur();
 });
 
 // After editing a field (Enter, or the value committed), hand focus back so
