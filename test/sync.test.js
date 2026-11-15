@@ -188,3 +188,96 @@ test('totals: first write inserts, later writes merge', async () => {
 	await t1.flushTotals();
 	assert.deepEqual(await t2.flushTotals(), { s: 2, f: 1 });
 });
+
+// Make the next CAS call land (or not) on the server but throw like a dropped connection.
+function dropResponse(srv, method, { lands }) {
+	const orig = srv.api[method];
+	srv.api[method] = async (...args) => {
+		srv.api[method] = orig;
+		if (lands) await orig(...args);
+		throw new TypeError('Failed to fetch');
+	};
+}
+
+test('lost response after the write landed: not applied twice', async () => {
+	const srv = fakeServer();
+	srv.seed(routine());
+	const tab = createSync(srv.api);
+	tab.addSectionDelta('p1', 'a', 's', 1);
+	tab.addTotalsDelta('s', 1);
+	dropResponse(srv, 'casUpdatePractice', { lands: true });
+	await assert.rejects(tab.flushPractice(local(srv)));
+	assert.equal(tab.hasPending('p1'), false);
+	await tab.flushPractice(local(srv));
+	assert.deepEqual(srv.rows.get('p1').metronomes[0].stats, { s: 1, f: 0 });
+
+	await tab.flushTotals(); // creates the row
+	tab.addTotalsDelta('f', 1);
+	dropResponse(srv, 'casUpdateTotals', { lands: true });
+	await assert.rejects(tab.flushTotals());
+	assert.equal(tab.hasTotalsPending(), false);
+	assert.deepEqual([srv.totals.success, srv.totals.fail], [1, 1]);
+});
+
+test('lost response when the write did not land: applied on retry', async () => {
+	const srv = fakeServer();
+	srv.seed(routine());
+	const tab = createSync(srv.api);
+	tab.addSectionDelta('p1', 'a', 'f', 2);
+	dropResponse(srv, 'casUpdatePractice', { lands: false });
+	await assert.rejects(tab.flushPractice(local(srv)));
+	assert.equal(tab.hasPending('p1'), true);
+	await tab.flushPractice(local(srv));
+	assert.deepEqual(srv.rows.get('p1').metronomes[0].stats, { s: 0, f: 2 });
+});
+
+test('outcome unknown (re-read also fails): stays in flight and is resolved first next time', async () => {
+	const srv = fakeServer();
+	srv.seed(routine());
+	const tab = createSync(srv.api);
+	tab.addSectionDelta('p1', 'a', 's', 1);
+	const fetchOrig = srv.api.fetchPractice;
+	dropResponse(srv, 'casUpdatePractice', { lands: true });
+	let calls = 0;
+	srv.api.fetchPractice = async (id) => {
+		if (++calls === 2) throw new TypeError('offline'); // the re-read after the drop
+		return fetchOrig(id);
+	};
+	await assert.rejects(tab.flushPractice(local(srv)));
+	assert.equal(tab.exportState().inflight.length, 1);
+	srv.api.fetchPractice = fetchOrig;
+	await tab.flushPractice(local(srv));
+	assert.deepEqual(srv.rows.get('p1').metronomes[0].stats, { s: 1, f: 0 });
+	assert.equal(tab.exportState().inflight.length, 0);
+});
+
+test('state survives export → import into a new tab (closed-tab recovery), applied once', async () => {
+	const srv = fakeServer();
+	srv.seed(routine());
+	const saved = [];
+	const closing = createSync(srv.api, (st) => saved.push(st));
+	closing.addSectionDelta('p1', 'b', 's', 1);
+	closing.addTotalsDelta('s', 1);
+	const stored = JSON.parse(JSON.stringify(saved.at(-1))); // what localStorage holds
+	assert.deepEqual(stored.sections, { p1: { b: { s: 1, f: 0 } } });
+
+	const next = createSync(srv.api);
+	next.importState(stored);
+	await next.flushPractice(local(srv));
+	await next.flushTotals();
+	assert.deepEqual(srv.rows.get('p1').metronomes[1].stats, { s: 1, f: 0 });
+	assert.equal(srv.totals.success, 1);
+	assert.equal(next.isEmptyState(next.exportState()), true);
+	await next.flushTotals();
+	assert.equal(srv.totals.success, 1);
+});
+
+test('dropCounts clears memory and reports an empty state', () => {
+	const saved = [];
+	const tab = createSync(fakeServer().api, (st) => saved.push(st));
+	tab.addSectionDelta('p1', 'a', 's', 1);
+	tab.addTotalsDelta('f', 1);
+	tab.dropCounts();
+	assert.equal(tab.isEmptyState(saved.at(-1)), true);
+	assert.deepEqual(tab.pendingPracticeIds(), []);
+});

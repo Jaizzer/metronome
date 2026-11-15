@@ -91,11 +91,23 @@ export function reconcileSections(localSections, serverSections, pending, keepLo
  *   casUpdateTotals(updatedAt, success, fail) → row | null
  *   insertTotals(success, fail) → row | null (null = row appeared meanwhile)
  * }
+ * onChange(state): called after every change to the unsaved counts, with
+ * exportState(), so main.js can mirror them to localStorage. Structure
+ * edits are not part of it (they're re-sent from the open tab only).
+ *
+ * Lost responses: before each write, the expected result is recorded as
+ * `inflight` (and mirrored). If the request errors out we can't tell
+ * whether it landed, so we re-read: unchanged `updated_at` → it didn't;
+ * values equal to what we expected → it did (don't apply twice); anything
+ * else → assume it didn't and apply again later.
  */
-export function createSync(api) {
-	const sectionDeltas = new Map(); // practiceId → Map(sectionId → { s, f })
+export function createSync(api, onChange = () => {}) {
+	let sectionDeltas = new Map(); // practiceId → Map(sectionId → { s, f })
 	const structVersion = new Map(); // practiceId → edit counter (absent = clean)
 	const totalsDelta = { s: 0, f: 0 };
+	let inflight = []; // writes sent whose outcome we haven't confirmed
+
+	const changed = () => onChange(exportState());
 
 	function deltasFor(pid) {
 		if (!sectionDeltas.has(pid)) sectionDeltas.set(pid, new Map());
@@ -107,10 +119,12 @@ export function createSync(api) {
 		const d = m.get(sid) ?? { s: 0, f: 0 };
 		d[kind] += n;
 		m.set(sid, d);
+		changed();
 	}
 
 	function addTotalsDelta(kind, n) {
 		totalsDelta[kind] += n;
+		changed();
 	}
 
 	function markStructure(pid) {
@@ -125,8 +139,25 @@ export function createSync(api) {
 		return sectionDeltas.get(pid) ?? new Map();
 	}
 
+	const nonZero = (d) => d && (d.s || d.f);
+
 	function hasPending(pid) {
-		return isStructDirty(pid) || [...pendingFor(pid).values()].some((d) => d.s || d.f);
+		return (
+			isStructDirty(pid) ||
+			[...pendingFor(pid).values()].some(nonZero) ||
+			inflight.some((w) => w.type === 'practice' && w.id === pid)
+		);
+	}
+
+	function pendingPracticeIds() {
+		const ids = new Set([...structVersion.keys()]);
+		for (const [pid, m] of sectionDeltas) if ([...m.values()].some(nonZero)) ids.add(pid);
+		for (const w of inflight) if (w.type === 'practice') ids.add(w.id);
+		return [...ids];
+	}
+
+	function hasTotalsPending() {
+		return Boolean(nonZero(totalsDelta) || inflight.some((w) => w.type === 'totals'));
 	}
 
 	function totalsPending() {
@@ -136,11 +167,52 @@ export function createSync(api) {
 	function forget(pid) {
 		sectionDeltas.delete(pid);
 		structVersion.delete(pid);
+		inflight = inflight.filter((w) => !(w.type === 'practice' && w.id === pid));
+		changed();
+	}
+
+	// ---- persistence (localStorage mirror) ----
+
+	function exportState() {
+		const sections = {};
+		for (const [pid, m] of sectionDeltas) {
+			for (const [sid, d] of m) if (nonZero(d)) (sections[pid] ??= {})[sid] = { ...d };
+		}
+		return { sections, totals: { ...totalsDelta }, inflight: JSON.parse(JSON.stringify(inflight)) };
+	}
+
+	function isEmptyState(st) {
+		return !st || (!Object.keys(st.sections ?? {}).length && !nonZero(st.totals) && !(st.inflight ?? []).length);
+	}
+
+	// Adds another tab's (or a previous session's) unsaved counts to ours.
+	function importState(st) {
+		if (!st) return;
+		for (const [pid, secs] of Object.entries(st.sections ?? {})) {
+			for (const [sid, d] of Object.entries(secs)) {
+				const m = deltasFor(pid);
+				const cur = m.get(sid) ?? { s: 0, f: 0 };
+				m.set(sid, { s: cur.s + (d.s | 0), f: cur.f + (d.f | 0) });
+			}
+		}
+		totalsDelta.s += st.totals?.s | 0;
+		totalsDelta.f += st.totals?.f | 0;
+		inflight.push(...(st.inflight ?? []));
+		changed();
+	}
+
+	// Forget every unsaved count in memory (another tab took them over).
+	function dropCounts() {
+		sectionDeltas = new Map();
+		totalsDelta.s = 0;
+		totalsDelta.f = 0;
+		inflight = [];
+		changed();
 	}
 
 	function subtract(pid, snapshot) {
 		const m = pendingFor(pid);
-		for (const [sid, d] of snapshot) {
+		for (const [sid, d] of Object.entries(snapshot)) {
 			const cur = m.get(sid);
 			if (!cur) continue;
 			cur.s -= d.s;
@@ -149,9 +221,60 @@ export function createSync(api) {
 		}
 	}
 
+	function settle(w, applied) {
+		inflight = inflight.filter((x) => x !== w);
+		if (applied) {
+			if (w.type === 'practice') subtract(w.id, w.snapshot);
+			else {
+				totalsDelta.s -= w.snapshot.s;
+				totalsDelta.f -= w.snapshot.f;
+			}
+		}
+		changed();
+	}
+
+	// Did an unconfirmed write land? Re-read and compare (see header).
+	async function resolveInflight(w) {
+		if (w.type === 'practice') {
+			const row = await api.fetchPractice(w.id);
+			if (!row) return settle(w, false);
+			if (row.updated_at === w.prev) return settle(w, false);
+			const byId = new Map((row.metronomes ?? []).map((m) => [m.id, m.stats ?? {}]));
+			const landed = Object.entries(w.expected).every(([sid, e]) => {
+				const st = byId.get(sid);
+				return st && (st.s | 0) === e.s && (st.f | 0) === e.f;
+			});
+			return settle(w, landed);
+		}
+		const row = await api.fetchTotals();
+		if (!row || row.updated_at === w.prev) return settle(w, false);
+		settle(w, row.success === w.expected.s && row.fail === w.expected.f);
+	}
+
+	async function resolveAll(match) {
+		for (const w of inflight.filter(match)) await resolveInflight(w);
+	}
+
+	// Send one write, recording it as in flight until its outcome is known.
+	async function guardedWrite(w, send) {
+		inflight.push(w);
+		changed();
+		let result;
+		try {
+			result = await send();
+		} catch (e) {
+			// No answer: maybe it landed. Find out before anything is re-sent.
+			await resolveInflight(w).catch(() => {}); // still unknown → stays in flight
+			throw e;
+		}
+		settle(w, Boolean(result)); // null = lost the CAS race: definitely not applied
+		return result;
+	}
+
 	// Returns the row as written, or null if the routine was deleted elsewhere.
 	async function flushPractice(local) {
 		const pid = local.id;
+		await resolveAll((w) => w.type === 'practice' && w.id === pid);
 		for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
 			const server = await api.fetchPractice(pid);
 			if (!server) {
@@ -160,12 +283,15 @@ export function createSync(api) {
 			}
 			ensureSectionIds(server.metronomes ?? []);
 			// Snapshot after the await so it matches `local` exactly.
-			const snapshot = new Map([...pendingFor(pid)].map(([k, d]) => [k, { ...d }]));
+			const snapshot = {};
+			for (const [sid, d] of pendingFor(pid)) if (nonZero(d)) snapshot[sid] = { ...d };
 			const version = structVersion.get(pid);
-			const patch = mergeForWrite({ server, local, deltas: snapshot, structDirty: version !== undefined });
-			const written = await api.casUpdatePractice(pid, server.updated_at, patch);
+			const patch = mergeForWrite({ server, local, deltas: new Map(Object.entries(snapshot)), structDirty: version !== undefined });
+			const expected = {};
+			for (const m of patch.metronomes) if (snapshot[m.id]) expected[m.id] = { ...m.stats };
+			const w = { type: 'practice', id: pid, prev: server.updated_at, snapshot, expected };
+			const written = await guardedWrite(w, () => api.casUpdatePractice(pid, server.updated_at, patch));
 			if (!written) continue; // someone else wrote first: re-read and retry
-			subtract(pid, snapshot);
 			if (version !== undefined && structVersion.get(pid) === version) structVersion.delete(pid);
 			return written;
 		}
@@ -174,17 +300,16 @@ export function createSync(api) {
 
 	// Returns the all-time { s, f } as written.
 	async function flushTotals() {
+		await resolveAll((w) => w.type === 'totals');
 		for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
 			const server = await api.fetchTotals();
-			const snap = { ...totalsDelta };
-			const next = addStats({ s: server?.success ?? 0, f: server?.fail ?? 0 }, snap);
-			const written = server
-				? await api.casUpdateTotals(server.updated_at, next.s, next.f)
-				: await api.insertTotals(next.s, next.f);
-			if (!written) continue;
-			totalsDelta.s -= snap.s;
-			totalsDelta.f -= snap.f;
-			return next;
+			const snapshot = { ...totalsDelta };
+			const next = addStats({ s: server?.success ?? 0, f: server?.fail ?? 0 }, snapshot);
+			const w = { type: 'totals', prev: server?.updated_at ?? null, snapshot, expected: next };
+			const written = await guardedWrite(w, () =>
+				server ? api.casUpdateTotals(server.updated_at, next.s, next.f) : api.insertTotals(next.s, next.f),
+			);
+			if (written) return next;
 		}
 		throw new Error('Too many simultaneous edits; will retry.');
 	}
@@ -196,8 +321,14 @@ export function createSync(api) {
 		isStructDirty,
 		pendingFor,
 		hasPending,
+		pendingPracticeIds,
+		hasTotalsPending,
 		totalsPending,
 		forget,
+		exportState,
+		importState,
+		isEmptyState,
+		dropCounts,
 		flushPractice,
 		flushTotals,
 	};
