@@ -130,6 +130,10 @@ export async function proxy(request, upstreamBase = process.env.NEON_AUTH_URL) {
 		if (value) headers.set(name, value);
 	}
 	headers.set('origin', UPSTREAM_ORIGIN);
+	// Pass the real client IP on, so Neon's per-IP rate limits don't lump
+	// every user of this proxy together. Vercel sets x-real-ip.
+	const ip = request.headers.get('x-real-ip') || request.headers.get('x-forwarded-for')?.split(',')[0].trim();
+	if (ip) headers.set('x-forwarded-for', ip);
 
 	const hasBody = !['GET', 'HEAD'].includes(request.method);
 	let upstream;

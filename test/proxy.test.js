@@ -90,3 +90,9 @@ test('normal nested paths still go through', async () => {
 	await proxy(req('/api/auth-proxy?__path=email-otp/verify-email', { method: 'POST', headers: { origin: APP }, body: '{}' }), UPSTREAM);
 	assert.equal(calls[0].url, UPSTREAM + '/email-otp/verify-email');
 });
+
+test('forwards the client IP as x-forwarded-for', async () => {
+	const calls = withFetch(() => new Response('{}'));
+	await proxy(req('/api/auth/get-session', { headers: { 'x-real-ip': '203.0.113.7', 'x-forwarded-for': '203.0.113.7, 10.0.0.1' } }), UPSTREAM);
+	assert.equal(calls[0].init.headers.get('x-forwarded-for'), '203.0.113.7');
+});
