@@ -99,6 +99,17 @@ function setSyncIndicator(state) {
 	el.textContent = state === 'saving' ? 'Saving…' : state === 'error' ? 'Not saved' : 'Synced';
 }
 
+// Failed saves retry with backoff and only the first failure in a row
+// shows a toast, so a dead connection doesn't bury the ✓/✗ flashes.
+const BACKOFF_MS = [5000, 10000, 30000, 60000];
+let failStreak = 0;
+const retryDelay = () => BACKOFF_MS[Math.min(Math.max(failStreak, 1), BACKOFF_MS.length) - 1];
+
+function isAuthError(e) {
+	const text = `${e?.name ?? ''} ${e?.message ?? ''} ${e?.code ?? ''}`;
+	return e?.status === 401 || /AuthRequired|Authentication required|JWT|PGRST301/i.test(text);
+}
+
 // Wraps a write with sync-indicator feedback. Never alert(): a modal
 // dialog in the middle of a run would stop the practice.
 async function withSync(promise) {
@@ -107,12 +118,15 @@ async function withSync(promise) {
 	try {
 		const result = await promise;
 		if (--savesInFlight === 0) setSyncIndicator('synced');
+		failStreak = 0;
 		return result;
 	} catch (e) {
 		savesInFlight--;
+		failStreak++;
 		console.error('Sync failed:', e);
 		setSyncIndicator('error');
-		toast(`Couldn't save: ${e.message || e}. Retrying on your next change.`, 'error', 4000);
+		if (isAuthError(e)) sessionLost();
+		else if (failStreak === 1) toast('Couldn’t save. Your records are kept on this device; retrying.', 'error', 4000);
 		throw e;
 	}
 }
@@ -263,8 +277,6 @@ function serial(fn) {
 	return run;
 }
 
-const RETRY_MS = 5000;
-
 // A structure edit (name, loop, tempo, length, ramp, order, add/remove).
 function savePractice(p) {
 	if (!p?.id) return;
@@ -325,7 +337,7 @@ async function flushPractices() {
 			);
 			refreshViews();
 		} catch {
-			debounce('practices', flushPractices, RETRY_MS); // deltas stay pending
+			if (currentSession) debounce('practices', flushPractices, retryDelay()); // deltas stay pending
 		}
 	});
 }
@@ -338,11 +350,13 @@ function showTotals(server) {
 
 async function flushTotals() {
 	await serial(async () => {
+		if (!currentSession || !sync.hasTotalsPending()) return;
+		if (!ownsPending()) return sync.dropCounts();
 		try {
 			showTotals(await withSync(sync.flushTotals()));
 			refreshViews();
 		} catch {
-			debounce('mastery', flushTotals, RETRY_MS);
+			if (currentSession) debounce('mastery', flushTotals, retryDelay());
 		}
 	});
 }
@@ -359,8 +373,6 @@ async function refreshFromServer() {
 	await claimOrphans(); // a tab closed since we loaded may have left counts
 	flushSaves(); // queued saves go first; they merge with the server anyway
 	await serial(async () => {
-		if (!currentSession || !sync.hasTotalsPending()) return;
-		if (!ownsPending()) return sync.dropCounts();
 		try {
 			const [rows, t] = await Promise.all([fetchPractices(), fetchTotalsRow()]);
 			const byId = new Map(practices.map((p) => [p.id, p]));
