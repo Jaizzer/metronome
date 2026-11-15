@@ -4,7 +4,7 @@
 // ============================================================
 
 import { parseTextTab } from './tabtext.js';
-import { barsFromScore, trackList, defaultTrack, scoreTitle } from './tabscore.js';
+import { barsFromScore, trackList, defaultTrack, scoreTitle, fileStatesTempo } from './tabscore.js';
 
 let pending = null;
 
@@ -51,7 +51,20 @@ function textSource(text, fileName = '') {
 async function scoreSource(data, fileName = '') {
 	const tv = await loadTabView();
 	const score = tv.parseScore(data);
-	return { format: 'score', data, fileName, score, title: scoreTitle(score, fileName), tempo: null, tracks: trackList(score), track: defaultTrack(score) };
+	const e = ext(fileName);
+	const kind = e.startsWith('gp') ? 'gp' : 'musicxml';
+	const raw = e === 'xml' || e === 'musicxml' ? new TextDecoder().decode(data) : null;
+	return {
+		format: 'score',
+		data,
+		fileName,
+		score,
+		title: scoreTitle(score, fileName),
+		tempo: null,
+		tempoKnown: fileStatesTempo(kind, raw, score),
+		tracks: trackList(score),
+		track: defaultTrack(score),
+	};
 }
 
 // A picked file or pasted text → a tab source:
@@ -75,4 +88,5 @@ export async function sourceFromRecord(rec) {
 }
 
 // The slicer's bar list for a source and track.
-export const sourceBars = (src, track = src.track) => (src.format === 'text' ? src.parsed.bars : barsFromScore(src.score, track));
+export const sourceBars = (src, track = src.track) =>
+	src.format === 'text' ? src.parsed.bars : barsFromScore(src.score, track, { tempoKnown: src.tempoKnown !== false });

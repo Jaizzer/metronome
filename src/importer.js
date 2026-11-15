@@ -136,6 +136,7 @@ export function createImporter(opts) {
 		const { bars, chunks } = plan(source, source.track);
 		const fileTarget = source.format === 'text' ? source.tempo : targetTempo(bars);
 		st = { source, track: source.track, bars, chunks, name: source.title, target: fileTarget ?? null, fromFile: fileTarget !== null && source.format !== 'text', openIdx: -1 };
+		st.noTempo = source.format === 'score' && fileTarget === null;
 		renderReview();
 		$('import-title').focus();
 	}
@@ -274,7 +275,11 @@ export function createImporter(opts) {
 	}
 
 	function targetHint() {
-		if (!(st.target >= 20 && st.target <= 300)) return st.source.format === 'text' ? 'Required: the tempo you’re aiming for (a text tab has no rhythm).' : 'Enter the tempo you’re aiming for (20–300).';
+		if (!(st.target >= 20 && st.target <= 300)) {
+			if (st.source.format === 'text') return 'Required: the tempo you’re aiming for (a text tab has no rhythm).';
+			if (st.noTempo) return 'Required: the file has no tempo. Enter the tempo you’re aiming for.';
+			return 'Enter the tempo you’re aiming for (20–300).';
+		}
 		const from = st.fromFile ? 'From the file. ' : '';
 		return `${from}Every chunk starts at ${startTempo(st.target)} BPM (70%) and climbs from there.`;
 	}

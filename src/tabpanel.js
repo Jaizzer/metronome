@@ -10,7 +10,6 @@ import { ACCEPT, readTab, sourceFromRecord, sourceBars, loadTabView } from './ta
 import { loadTab, saveTab, tabRecord, routineTab, checkReattach } from './tabstore.js';
 import { textBarsSlice } from './tabtext.js';
 import { tempoAt, barRange } from './slicer.js';
-import { tickRange } from './tabscore.js';
 
 const $ = (id) => document.getElementById(id);
 const OPEN_KEY = 'metronome:tab-open';
@@ -92,11 +91,14 @@ export function createTabPanel(opts) {
 		if (el) el.textContent = text;
 	}
 
-	function hearButton(on) {
+	// idle: "Hear it"; loading: "Loading sound… · Cancel"; playing: "Stop".
+	function hearButton(state) {
 		const btn = $('tab-hear');
 		if (!btn) return;
-		btn.replaceChildren(iconEl(on ? 'stop' : 'speaker'), on ? 'Stop' : 'Hear it');
-		btn.setAttribute('aria-pressed', String(on));
+		const label = { idle: 'Hear it', loading: 'Loading sound… · Cancel', playing: 'Stop' }[state];
+		btn.replaceChildren(iconEl(state === 'idle' ? 'speaker' : 'stop'), label);
+		btn.setAttribute('aria-pressed', String(state !== 'idle'));
+		btn.dataset.state = state;
 	}
 
 	async function render() {
@@ -150,7 +152,7 @@ export function createTabPanel(opts) {
 				),
 				viewHost,
 			);
-			hearButton(false);
+			hearButton('idle');
 			try {
 				const tv = await loadTabView();
 				if (my !== token) return;
@@ -165,43 +167,50 @@ export function createTabPanel(opts) {
 		try {
 			await view.show(src.score, src.track, a, b);
 		} catch (e) {
-			if (my === token) setStatus(e.message || 'The tab couldn’t be drawn');
+			if (my !== token) return;
+			dropView(); // the next try starts from a fresh alphaTab view
+			body.replaceChildren(h('p', { class: 'tab-note', role: 'alert' }, `Couldn’t draw this tab: ${e.message || e}`));
 		}
 	}
 
+	// Hear it / Stop / Cancel. Stop, a section change, closing the panel,
+	// leaving the player or the click resuming all end it through stop(),
+	// including while the sound is still loading.
 	async function hear() {
 		if (!view || !current) return;
 		if (hearing) return stop();
-		const { p, m } = current;
-		const src = await sourceFor(p).catch(() => null);
-		if (!src || src.format !== 'score') return;
+		const at = current;
+		const src = await sourceFor(at.p).catch(() => null);
+		if (current !== at || !src || src.format !== 'score' || !view) return;
+		const { m } = at;
+		const v = view;
 		hearing = true;
-		hearButton(true);
+		hearButton('loading');
 		const wasRunning = opts.pauseClick();
-		const bars = sourceBars(src);
+		// What the synth plays at speed 1 (alphaTab uses 120 when the file has no tempo).
+		const fileTempo = tempoAt(sourceBars(src), m.bars[0]) || src.score.tempo || 120;
 		const bpm = opts.liveBpm();
-		const fileTempo = tempoAt(bars, m.bars[0]) || src.score.tempo || bpm;
-		// A seam ends on the first beat of its second bar.
-		const range = tickRange(bars, m.bars[0], m.bars[1], Boolean(m.seam));
-		setStatus('Loading the sound…');
-		const offState = view.onState((s) => {
-			if (s.playing) setStatus(`Playing at ${bpm} BPM`);
+		const offState = v.onState((s) => {
+			if (s.playing) {
+				hearButton('playing');
+				setStatus(`Playing at ${bpm} BPM`);
+			}
 		});
 		try {
-			await view.hear({ bpm, fileTempo, range });
+			await v.hear({ bpm, fileTempo, start: m.bars[0], end: m.bars[1], seam: Boolean(m.seam) });
 		} catch (e) {
 			opts.toast(e.message || 'Couldn’t play the tab', 'error', 3000);
 		} finally {
 			offState();
 			hearing = false;
-			hearButton(false);
+			if (view === v) hearButton('idle');
 			setStatus('');
 			if (wasRunning) opts.resumeClick();
 		}
 	}
 
 	function stop() {
-		if (view?.isPlaying) view.stop();
+		view?.stop();
 	}
 
 	function dropView() {
@@ -211,23 +220,41 @@ export function createTabPanel(opts) {
 	}
 
 	async function reattach(p, file) {
+		let src;
+		let bars;
+		let check;
+		const ref = routineTab(p);
 		try {
-			const src = await readTab({ file });
-			const ref = routineTab(p);
+			src = await readTab({ file });
 			if (src.format === 'score') {
 				if (ref && !src.score.tracks[ref.track]) throw new Error(`This file has no track ${ref.track + 1}`);
 				src.track = ref?.track ?? src.track;
 			}
-			const bars = sourceBars(src).length;
-			const check = checkReattach(p, { format: src.format, bars, title: src.title });
+			bars = sourceBars(src).length;
+			check = checkReattach(p, { format: src.format, bars, title: src.title });
 			if (!check.ok) throw new Error(check.reason);
-			await saveTab(tabRecord({ routineId: p.id, fileName: file.name, format: src.format, data: src.data, track: src.track, title: src.title, bars }));
-			cache.set(p.id, Promise.resolve(src));
-			opts.toast(check.sameTitle ? 'Tab attached' : `Tab attached · “${src.title}”`, '', 2000);
-			if (current?.p === p) render();
 		} catch (e) {
 			opts.toast(e.message || String(e), 'error', 4000);
+			return;
 		}
+		const attach = async () => {
+			try {
+				await saveTab(tabRecord({ routineId: p.id, fileName: file.name, format: src.format, data: src.data, track: src.track, title: src.title, bars }));
+				cache.set(p.id, Promise.resolve(src));
+				opts.toast('Tab attached', '', 2000);
+				if (current?.p === p) render();
+			} catch (e) {
+				opts.toast(e.message || String(e), 'error', 4000);
+			}
+		};
+		if (check.sameTitle) return attach();
+		opts.confirm({
+			title: 'Use this file?',
+			text: `This file is “${src.title}”, the routine was imported from “${ref?.title ?? ''}”. Use it anyway?`,
+			confirm: 'Use it',
+			danger: false,
+			onConfirm: attach,
+		});
 	}
 
 	return {
