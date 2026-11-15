@@ -6,11 +6,11 @@ A practice metronome for guitar routines, with a foot-pedal ✓/✗ record of ev
 
 ## What it does
 
-- **Routines** of timed **sections**. Each section has a name, a tempo, a length, and an optional ramp from a start BPM to an end BPM over the section. Routines can loop. Sections reorder by drag (mouse or touch) on the grip, or with arrow keys on the grip.
+- **Routines** of timed **sections**. Each section has a name, a tempo, a length, and an optional ramp from a start BPM to an end BPM over the section. Routines can loop. The list shows one calm row per section (name, tempo, length); tap a row to edit it. Sections reorder by dragging **Move** (mouse or touch) in the open row, or with arrow keys on it. Loop, Song mode, reset and delete live under each routine's **Options**.
 - **Player**: accented click (beat 1 of 4), beat blocks, countdown and progress, a stop strip to jump between sections, prev / play-pause / next. Change the tempo with − / +, by dragging the BPM number up or down, or with ↑ / ↓ (Shift = 5). A manual change stops the ramp and becomes the section's tempo. Space toggles play. The screen stays awake while playing.
 - **✓ / ✗ record**: every run is recorded against the current section (the playing one, or the selected one in the routine list). Per-section and per-routine totals and accuracy show in both views; the all-time total is kept separately. Undo with the Undo button, Cmd/Ctrl+Z, or a pedal hold (last 50 records).
 - **Song mode** (per routine): set a target BPM; each section is a chunk (or a Run play-through). Every ✓/✗ is logged with its tempo; 2 ✓ in a row raises the chunk's tempo, 2 ✗ suggests a smaller chunk, 4 ✗ lowers it. A tempo passed cold (first try of the day) on 2 days is *owned*; the song tempo is the lowest owned tempo among joined chunks, and each section shows its state, owned tempo and when it's due for review. Rules: `docs/PRACTICE-ALGORITHM.md`; logic: `src/engine.js`.
-- Volume, show/hide stats, reset (all-time or per routine), sign up with an emailed 6-digit code, sign in, sign out. Data syncs through Neon, so it follows you across devices.
+- Volume, show/hide stats and reset all-time (player **Settings**), reset per routine (**Options**), sign up with an emailed 6-digit code, sign in, sign out. Data syncs through Neon, so it follows you across devices.
 
 ## Foot pedal
 
