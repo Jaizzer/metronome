@@ -47,3 +47,13 @@ Design agreed in conversation 2026-11-15 (owner's 80% / 30-attempt rule, improve
 ## Routine list / summary
 - Each part row: state, BPM, rolling %, cold %, best confirmed BPM.
 - End-of-session summary: attempts, rolling %, cold %, tempo moves, items that left the rotation.
+
+## Song tempo: how parts, links and the full run move together (added 2026-11-15)
+- **Target BPM** = the record's tempo, entered once per piece. Milestones shown as % of target (60, 70, 80, 90, 100, 105% overspeed).
+- **Each part climbs on its own** (engine rules: rolling 80%, next-day confirm, +4% / −10%).
+- **Song tempo** = the slowest confirmed BPM among parts that have **joined** the song.
+- **Joining:** a New part practises alone until it is confirmed at the current song tempo; then it joins, and its seam to the previous part is added.
+- **Cap:** a joined part stops climbing at song tempo + 10% (a little overspeed makes the song tempo feel easy). Practice time flows to the slowest part, which is what raises the song tempo.
+- **Seams, links and the full run always play at the song tempo.** Raising the song tempo (when the slowest part confirms higher) moves all of them up together.
+- **Full run ✓/✗:** play through without stopping; tap ✗ the moment of a slip (time-stamped; with "bars per part" the app attributes it to a part and counts it there); tap ✓ once at the end if it held together. A milestone counts when the full run holds together on 2 different days.
+- Player shows: `Song tempo 72 (60% of 120) · Slowest: Part 3 · Next milestone 84`.
