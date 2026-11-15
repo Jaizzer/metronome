@@ -1677,8 +1677,11 @@ function toggleSection(li, m) {
 	if (open) setSectionOpen(li, true);
 }
 
-const tempoLabel = (m, song) =>
-	!song && m.ramp && m.endBPM && m.endBPM !== m.startBPM ? `${m.startBPM}→${m.endBPM}` : String(m.startBPM);
+// The row's tempo: "60", or "60→80" with a small arrow when it ramps.
+function fillTempo(el, m, song) {
+	const ramps = !song && m.ramp && m.endBPM && m.endBPM !== m.startBPM;
+	el.replaceChildren(String(m.startBPM), ...(ramps ? [h('i', { 'aria-label': ' to ' }, '→'), String(m.endBPM)] : []));
+}
 
 function bpmInput(props) {
 	return h('input', { type: 'number', min: '20', max: '300', step: '1', inputmode: 'numeric', ...props });
@@ -1724,7 +1727,8 @@ function renderSection(p, pIdx, m, mIdx, song = null) {
 	li._section = m;
 
 	const rowName = h('span', { class: 'sec-label' }, m.name);
-	const rowTempo = h('b', {}, tempoLabel(m, song));
+	const rowTempo = h('b');
+	fillTempo(rowTempo, m, song);
 	const head = h(
 		'button',
 		{
@@ -1743,7 +1747,7 @@ function renderSection(p, pIdx, m, mIdx, song = null) {
 	// the click that moved focus away).
 	const syncRow = () => {
 		rowName.textContent = m.name;
-		rowTempo.textContent = tempoLabel(m, song);
+		fillTempo(rowTempo, m, song);
 	};
 
 	const grip = h(
@@ -2267,6 +2271,8 @@ async function addRoutine() {
 }
 
 $('addPracticeBtn').onclick = addRoutine;
+$('addPracticeTop').onclick = addRoutine;
+$('addPracticeTop').innerHTML = icons.plus;
 $('addPracticeBtn').replaceChildren(iconEl('plus'), 'New routine');
 $('signOutBtn').replaceChildren(iconEl('signout'), 'Sign out');
 $('view-list').replaceChildren(iconEl('list'), 'List');
