@@ -67,7 +67,19 @@
 				<button id="addPracticeBtn" class="btn btn-primary" type="button">New routine</button>
 			</div>
 			<p id="alltime" class="alltime"></p>
+			<div class="view-bar">
+				<div class="seg" role="group" aria-label="Routine layout">
+					<button id="view-list" class="seg-btn" type="button" aria-pressed="true">List</button>
+					<button id="view-slide" class="seg-btn" type="button" aria-pressed="false">Slide</button>
+				</div>
+				<div id="pager" class="pager" hidden>
+					<button id="slide-prev" class="btn btn-quiet btn-icon" type="button" aria-label="Previous routine"></button>
+					<span id="slide-pos" class="slide-pos" aria-live="polite"></span>
+					<button id="slide-next" class="btn btn-quiet btn-icon" type="button" aria-label="Next routine"></button>
+				</div>
+			</div>
 			<div id="app"></div>
+			<div id="slide-dots" class="slide-dots" hidden></div>
 		</div>
 		<div class="record-bar" role="region" aria-label="Record a run">
 			<div class="record-bar-inner">

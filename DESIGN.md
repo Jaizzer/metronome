@@ -45,4 +45,7 @@ Every ✓/✗ record floods its panel (and the record-bar button) with solid ink
 - **Toast**: top-centre, ink-coloured by kind, 1.4–2 s, `role=status`.
 - **Focus**: 3px amber outline, 2px offset. Text selection is amber with stock text.
 - **Motion**: only the overprint, toast slide (250 ms ease-out), and switch thumb; all disabled under `prefers-reduced-motion`.
-- **Layout**: single column, max 640px for routines; player goes two-column (tempo | tally) from 900px.
+- **Layout**: single column, max 640px for routines; player goes two-column (tempo | tally) from 900px. Under 560px a section's name takes the whole row and its ✓/✗ tally drops beneath it.
+- **List / Slide**: a segmented switch under the all-time line. List = routines stacked vertically; Slide = one routine per screen in a scroll-snap track with ‹ n / N › and dots (off-screen routines are `inert`). The choice is per device (`localStorage`), and the slide follows the routine the pedal records to.
+- **Icons beside words**: every icon sits next to its label (New routine, Sign out, Synced, Loop, Ramp, length, sections), drawn at 16–18px in `--paper-3` except on ink fills.
+- **Share bar**: a 6px ✓/✗ split under each routine's tally; the counts in text sit right above it, so colour is never the only cue.

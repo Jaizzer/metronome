@@ -96,7 +96,9 @@ function flushSaves() {
 function setSyncIndicator(state) {
 	const el = $('sync-indicator');
 	el.classList.toggle('error', state === 'error');
-	el.textContent = state === 'saving' ? 'Saving…' : state === 'error' ? 'Not saved' : 'Synced';
+	const text = state === 'saving' ? 'Saving…' : state === 'error' ? 'Not saved' : 'Synced';
+	if (state === 'synced') el.replaceChildren(iconEl('cloud'), text);
+	else el.textContent = text;
 }
 
 // Failed saves retry with backoff and only the first failure in a row
@@ -652,6 +654,7 @@ async function bootApp(session) {
 	}
 
 	restoreSelection();
+	slideIndex = Math.max(0, practices.findIndex((p) => p.id === selectedPracticeId));
 	renderBuilder();
 	applyStatsVisibility();
 	$('volumeSlider').value = metVolume;
@@ -898,9 +901,18 @@ function tallyInline(st) {
 	);
 }
 
+// A thin ✓/✗ share bar; the counts in text sit beside it.
+function shareBar(st) {
+	const n = st.s + st.f;
+	const bar = h('div', { class: 'share', 'aria-hidden': 'true' });
+	if (!n) bar.classList.add('is-empty');
+	else bar.append(h('span', { class: 'share-g', style: `flex-grow:${st.s}` }), h('span', { class: 'share-b', style: `flex-grow:${st.f}` }));
+	return bar;
+}
+
 function renderAlltime() {
 	$('alltime').replaceChildren(
-		h('span', {}, 'All-time '),
+		h('span', { class: 'alltime-label' }, iconEl('target'), 'All-time'),
 		h('b', {}, `✓ ${totals.s}`),
 		h('b', {}, `✗ ${totals.f}`),
 		h('span', {}, 'accuracy ', h('b', {}, formatAccuracy(totals))),
@@ -1489,6 +1501,7 @@ function renderSection(p, pIdx, m, mIdx) {
 				'aria-label': `${m.name} length ${formatDuration(m.duration)}. Change`,
 				onclick: () => openTimePicker(p, m),
 			},
+			iconEl('clock'),
 			formatDuration(m.duration),
 		),
 		h(
@@ -1504,6 +1517,7 @@ function renderSection(p, pIdx, m, mIdx) {
 					renderBuilder();
 				},
 			},
+			iconEl('ramp'),
 			'Ramp',
 		),
 		m.ramp &&
@@ -1586,6 +1600,7 @@ function renderRoutine(p, pIdx) {
 			},
 		},
 		h('span', { class: 'switch-track', 'aria-hidden': 'true' }),
+		iconEl('loop'),
 		'Loop',
 	);
 
@@ -1646,9 +1661,11 @@ function renderRoutine(p, pIdx) {
 				'div',
 				{ class: 'routine-meta' },
 				tallyInline(rt),
-				h('span', {}, `${p.metronomes.length} ${p.metronomes.length === 1 ? 'section' : 'sections'} · ${formatDuration(totalTime)}`),
+				h('span', { class: 'meta-item' }, iconEl('layers'), `${p.metronomes.length} ${p.metronomes.length === 1 ? 'section' : 'sections'}`),
+				h('span', { class: 'meta-item' }, iconEl('clock'), formatDuration(totalTime)),
 				loopSwitch,
 			),
+			shareBar(rt),
 		),
 		h('ol', { class: 'sections' }, p.metronomes.map((m, mIdx) => renderSection(p, pIdx, m, mIdx))),
 		h(
@@ -1721,6 +1738,7 @@ function renderBuilder({ keepFocus = false } = {}) {
 			h(
 				'div',
 				{ class: 'empty' },
+				h('span', { class: 'empty-art', html: icons.metronome }),
 				h('p', {}, 'No routines yet. A routine is a list of timed sections, each with its own tempo.'),
 				h('button', { class: 'btn btn-primary', type: 'button', onclick: addRoutine }, 'Create your first routine'),
 			),
@@ -1729,8 +1747,89 @@ function renderBuilder({ keepFocus = false } = {}) {
 		app.replaceChildren(...practices.map((p, pIdx) => renderRoutine(p, pIdx)));
 	}
 	renderRecordBar();
-	if (focusSelector) document.querySelector(focusSelector)?.focus();
+	applyRoutineView();
+	if (focusSelector) document.querySelector(focusSelector)?.focus({ preventScroll: routineView === 'slide' });
 }
+
+// ---------------- Routine layout: vertical list or one-per-screen slides ----------------
+
+const VIEW_KEY = 'metronome:routine-view';
+let routineView = lsGet(VIEW_KEY) === 'slide' ? 'slide' : 'list';
+let slideIndex = 0;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+function setRoutineView(next) {
+	routineView = next;
+	try {
+		localStorage.setItem(VIEW_KEY, JSON.stringify(next));
+	} catch {
+		// private mode: the choice just isn't remembered
+	}
+	applyRoutineView();
+}
+
+function applyRoutineView() {
+	const slides = routineView === 'slide';
+	const n = practices.length;
+	$('app').classList.toggle('is-slides', slides);
+	$('view-list').setAttribute('aria-pressed', String(!slides));
+	$('view-slide').setAttribute('aria-pressed', String(slides));
+	$('pager').hidden = !slides || n < 2;
+	$('slide-dots').hidden = !slides || n < 2;
+	$('slide-dots').replaceChildren(
+		...practices.map((p, i) =>
+			h('button', { class: 'dot', type: 'button', 'aria-label': `Go to ${p.name}`, onclick: () => goToSlide(i) }),
+		),
+	);
+	if (slides) goToSlide(slideIndex, false);
+}
+
+function goToSlide(i, smooth = true) {
+	const app = $('app');
+	slideIndex = Math.max(0, Math.min(i, practices.length - 1));
+	const target = app.children[slideIndex];
+	if (routineView === 'slide' && target) {
+		app.scrollTo({ left: target.offsetLeft, behavior: smooth && !reduceMotion.matches ? 'smooth' : 'auto' });
+	}
+	updatePager();
+}
+
+function updatePager() {
+	const n = practices.length;
+	$('slide-pos').textContent = n ? `${slideIndex + 1} / ${n}` : '';
+	$('slide-prev').disabled = slideIndex <= 0;
+	$('slide-next').disabled = slideIndex >= n - 1;
+	[...$('slide-dots').children].forEach((d, i) => d.setAttribute('aria-current', String(i === slideIndex)));
+	[...$('app').children].forEach((el, i) => {
+		if (el.classList.contains('routine')) el.inert = routineView === 'slide' && i !== slideIndex;
+	});
+}
+
+// Swiping: the nearest routine to the scroll position becomes the current slide.
+let slideFrame = 0;
+$('app').addEventListener('scroll', () => {
+	if (routineView !== 'slide' || slideFrame) return;
+	slideFrame = requestAnimationFrame(() => {
+		slideFrame = 0;
+		const app = $('app');
+		let best = 0;
+		[...app.children].forEach((el, i) => {
+			if (Math.abs(el.offsetLeft - app.scrollLeft) < Math.abs(app.children[best].offsetLeft - app.scrollLeft)) best = i;
+		});
+		if (best !== slideIndex) {
+			slideIndex = best;
+			updatePager();
+		}
+	});
+});
+
+// Keep the current routine in place when the window (or phone) turns.
+addEventListener('resize', () => routineView === 'slide' && goToSlide(slideIndex, false));
+
+$('view-list').onclick = () => setRoutineView('list');
+$('view-slide').onclick = () => setRoutineView('slide');
+$('slide-prev').onclick = () => goToSlide(slideIndex - 1);
+$('slide-next').onclick = () => goToSlide(slideIndex + 1);
 
 // ---------------- Delete routine ----------------
 
@@ -1762,6 +1861,7 @@ async function addRoutine() {
 		ensureSectionIds(practices[practices.length - 1].metronomes);
 		const p = practices[practices.length - 1];
 		selectSection(p, p.metronomes[0]);
+		slideIndex = practices.length - 1;
 		renderBuilder();
 		document.querySelector('.routine:last-of-type .routine-name')?.select();
 	} catch {
@@ -1770,6 +1870,12 @@ async function addRoutine() {
 }
 
 $('addPracticeBtn').onclick = addRoutine;
+$('addPracticeBtn').replaceChildren(iconEl('plus'), 'New routine');
+$('signOutBtn').replaceChildren(iconEl('signout'), 'Sign out');
+$('view-list').replaceChildren(iconEl('list'), 'List');
+$('view-slide').replaceChildren(iconEl('slides'), 'Slide');
+$('slide-prev').innerHTML = icons.back;
+$('slide-next').innerHTML = icons.forward;
 
 // Static icons in the markup.
 $('bar-good').innerHTML = icons.check;

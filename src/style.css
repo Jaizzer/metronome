@@ -1461,6 +1461,242 @@ dialog p {
 	height: 44px;
 }
 
+/* ---------- Icons beside text ---------- */
+
+.sync {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--s1);
+}
+
+.alltime-label,
+.meta-item {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--s1);
+}
+
+.alltime-label svg.icon,
+.meta-item svg.icon {
+	width: 16px;
+	height: 16px;
+	color: var(--paper-3);
+}
+
+.duration-btn,
+.ramp-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.duration-btn svg.icon {
+	width: 16px;
+	height: 16px;
+	color: var(--paper-3);
+}
+
+.ramp-btn svg.icon,
+.switch svg.icon {
+	width: 16px;
+	height: 16px;
+}
+
+/* ✓/✗ share of a routine's runs; the ✓/✗ counts sit right above it. */
+.share {
+	grid-column: 1 / -1;
+	display: flex;
+	gap: 2px;
+	height: 6px;
+	border-radius: 3px;
+	overflow: hidden;
+	background: var(--rule);
+}
+
+.share-g {
+	background: var(--good);
+}
+
+.share-b {
+	background: var(--bad);
+}
+
+.empty-art {
+	display: block;
+	margin: 0 auto var(--s4);
+	color: var(--amber);
+}
+
+.empty-art svg.icon {
+	width: 72px;
+	height: 72px;
+	stroke-width: 1.75;
+}
+
+/* ---------- Routine layout: List / Slide ---------- */
+
+.view-bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--s2);
+	padding: var(--s3) 0 0;
+}
+
+.seg {
+	display: inline-flex;
+	padding: 2px;
+	border: 2px solid var(--rule);
+	border-radius: var(--radius);
+}
+
+.seg-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--s2);
+	min-height: 40px;
+	padding: 0 var(--s3);
+	border: none;
+	border-radius: 4px;
+	background: none;
+	color: var(--paper-2);
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.seg-btn:hover {
+	color: var(--paper);
+}
+
+.seg-btn[aria-pressed='true'] {
+	background: var(--amber);
+	color: var(--on-ink);
+}
+
+.seg-btn svg.icon {
+	width: 18px;
+	height: 18px;
+}
+
+.pager {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--s1);
+}
+
+.pager[hidden],
+.slide-dots[hidden] {
+	display: none;
+}
+
+.slide-pos {
+	min-width: 4ch;
+	text-align: center;
+	font-family: var(--font-num);
+	font-size: 22px;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+#app {
+	position: relative; /* slides measure offsetLeft against it */
+}
+
+#app.is-slides {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--s4);
+	overflow-x: auto;
+	overscroll-behavior-x: contain;
+	scroll-snap-type: x mandatory;
+	scrollbar-width: none;
+}
+
+#app.is-slides::-webkit-scrollbar {
+	display: none;
+}
+
+/* The slide track clips overflow, so the selected-section stop sits inside it. */
+#app.is-slides .sec::before {
+	left: 2px;
+}
+
+#app.is-slides > .routine {
+	flex: 0 0 100%;
+	min-width: 0;
+	scroll-snap-align: start;
+	scroll-snap-stop: always;
+}
+
+.slide-dots {
+	display: flex;
+	justify-content: center;
+	flex-wrap: wrap;
+	padding-top: var(--s2);
+}
+
+.dot {
+	display: grid;
+	place-items: center;
+	width: 32px;
+	height: 44px;
+	border: none;
+	background: none;
+}
+
+.dot::before {
+	content: '';
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	border: 2px solid var(--paper-3);
+}
+
+.dot[aria-current='true']::before {
+	background: var(--amber);
+	border-color: var(--amber);
+}
+
+/* ---------- Phones ---------- */
+
+@media (max-width: 560px) {
+	/* The section name gets the whole row; its ✓/✗ tally moves under it. */
+	.sec {
+		grid-template-columns: 40px 1fr 44px;
+		grid-template-areas:
+			'grip name remove'
+			'. stats stats'
+			'. fields fields';
+		row-gap: var(--s2);
+	}
+
+	.sec .tally-inline {
+		justify-self: start;
+		font-size: 13px;
+	}
+
+	.sec::before {
+		left: -8px;
+	}
+
+	.builder-head h1 {
+		font-size: 34px;
+	}
+
+	.routine-name {
+		font-size: 24px !important;
+	}
+
+	.routine-meta {
+		gap: var(--s1) var(--s3);
+	}
+
+	.builder {
+		padding-bottom: calc(140px + env(safe-area-inset-bottom));
+	}
+}
+
 @media (prefers-reduced-motion: reduce) {
 	*,
 	*::before,
