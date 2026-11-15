@@ -1,89 +1,87 @@
-# Metronome — Neon-backed setup
+# Metronome
 
-Your data (routines, mastery stats, settings) now lives in Postgres on Neon
-instead of browser localStorage, so it syncs across every device you sign
-into.
+A practice metronome for guitar routines, with a foot-pedal ✓/✗ record of every run.
 
-⚠️ **First, rotate your Neon database password.** It was pasted in plaintext
-earlier in this chat. In the Neon console: **Settings → Reset password**.
-None of the files below use that old credential, or any raw Postgres
-connection string at all — the app talks to Neon over HTTPS instead (see
-"Why no connection string" at the bottom).
+**Live:** https://metronome-navy.vercel.app
 
-## 1. One-time setup in the Neon console
+## What it does
 
-1. Go to https://console.neon.tech and open your project.
-2. **SQL Editor** → paste the entire contents of `sql/schema.sql` → Run.
-   This creates the `practices`, `mastery_counts`, and `user_settings`
-   tables with Row-Level Security so each user can only ever see their own
-   rows.
-3. **Auth** tab (left sidebar) → **Enable Neon Auth**. This gives you
-   email/password sign-in for free with no extra service to configure.
-4. **Data API** tab → **Enable Data API**. Once enabled, copy the URL shown
-   there (looks like `https://app-xxxxxxxx.dpl.myneon.app`).
+- **Routines** of timed **sections**. Each section has a name, a tempo, a length, and an optional ramp from a start BPM to an end BPM over the section. Routines can loop. Sections reorder by drag (mouse or touch) on the grip, or with arrow keys on the grip.
+- **Player**: accented click (beat 1 of 4), beat blocks, countdown and progress, a stop strip to jump between sections, prev / play-pause / next. Change the tempo with − / +, by dragging the BPM number up or down, or with ↑ / ↓ (Shift = 5). A manual change stops the ramp and becomes the section's tempo. Space toggles play. The screen stays awake while playing.
+- **✓ / ✗ record**: every run is recorded against the current section (the playing one, or the selected one in the routine list). Per-section and per-routine totals and accuracy show in both views; the all-time total is kept separately. Undo with the Undo button, Cmd/Ctrl+Z, or a pedal hold (last 50 records).
+- Volume, show/hide stats, reset (all-time or per routine), sign up with an emailed 6-digit code, sign in, sign out. Data syncs through Neon, so it follows you across devices.
 
-## 2. Configure the app
+## Foot pedal
 
-```bash
-cp .env.example .env
+The pedal must send the **Enter** key.
+
+| Pedal | Result |
+|---|---|
+| Tap | ✓ good run (recorded when the 600 ms double-tap window ends; a "Pending…" dot shows meanwhile) |
+| Double-tap | ✗ bad run (recorded at once; further taps in the same window are ignored) |
+| Hold ≥ 0.8 s | Undo the last record (a tap followed by a hold just cancels that tap) |
+
+Key auto-repeat is ignored, and the pedal does nothing while you're typing in a field or a dialog is open. Timings are `DOUBLE_TAP_MS` and `HOLD_MS` in `src/pedal.js`.
+
+## Data
+
+Tables (see `sql/schema.sql`, reference only): `practices` (a routine; its sections are the `metronomes` jsonb array), `mastery_counts` (all-time ✓/✗), `user_settings` (volume, show stats). Row-level security scopes every row to `auth.user_id()`.
+
+Per-section stats live inside each section object as `stats: { s, f }`, so no schema change was needed:
+
+```json
+{ "name": "Exercise 1", "startBPM": 100, "endBPM": 120, "ramp": true, "duration": 60, "stats": { "s": 12, "f": 3 } }
 ```
 
-Open `.env` and paste the Data API URL from step 1.4 into
-`VITE_NEON_DATA_API_URL`.
+## The auth proxy (and how to remove it)
 
-## 3. Install and run
+Neon Auth only accepts requests whose `Origin` is in its trusted domains, which currently holds only `http://localhost:5173`. Every other origin gets `403 INVALID_ORIGIN`.
+
+So in production the browser talks to **`/api/auth/*` on the app's own domain**. `vercel.json` rewrites that to `api/auth-proxy.js`, a Vercel function that:
+
+- rejects any request whose `Origin` isn't the app's own origin (requests without `Origin` are allowed only for GET/HEAD), which keeps the CSRF protection Better Auth would otherwise give;
+- forwards method, path, query, body, cookies, and auth headers to `NEON_AUTH_URL` with `Origin: http://localhost:5173`;
+- passes response headers through (including `set-auth-jwt`, which neon-js uses as the Bearer token for the Data API) and rewrites `Set-Cookie` without a `Domain`, so the session cookie is first-party on the app's domain.
+
+`src/db.js` uses the proxy whenever the page isn't on `http://localhost:5173`; on the Vite dev server it talks to Neon directly.
+
+**To remove it** once `https://metronome-navy.vercel.app` is added to Neon Auth's trusted domains in the Neon console (Auth settings):
+
+1. Delete `api/auth-proxy.js` and the `rewrites` entry in `vercel.json`.
+2. In `src/db.js`, set `AUTH_URL = DIRECT_AUTH_URL` (drop `useProxy`).
+3. Remove the `NEON_AUTH_URL` env var from Vercel, redeploy, and check sign-in.
+
+## Develop
 
 ```bash
+cp .env.example .env   # public Neon endpoints
 npm install
-npm run dev
+npm run dev            # http://localhost:5173 (must be this port: Neon trusts it)
+npm test               # pedal timing + record/undo unit tests
 ```
 
-Open the URL it prints (typically `http://localhost:5173`). You'll see a
-sign-in screen — click "Need an account? Sign up", enter an email and
-password, confirm via the email Neon Auth sends, then sign in.
+## Deploy
 
-## 4. Deploy it for real (optional)
-
-`npm run dev` is for local use only. To get a URL you can open from your
-phone too:
+Production is Vercel (project `jaizzers-projects/metronome`). Pushing to `main` deploys through the GitHub integration, or deploy by hand:
 
 ```bash
-npm run build
+vercel --prod --yes
 ```
 
-This produces a `dist/` folder of static files. Deploy that folder to any
-static host — Vercel, Netlify, Cloudflare Pages, GitHub Pages all work. Set
-the same `VITE_NEON_DATA_API_URL` as an environment variable in that host's
-dashboard before building, since Vite bakes it in at build time.
+Environment variables (Production and Preview): `VITE_NEON_AUTH_URL`, `VITE_NEON_DATA_API_URL` (baked into the bundle at build time) and `NEON_AUTH_URL` (read by the proxy at runtime). Values are in `.env.example`. Vercel deployment protection is off so the site is public.
 
----
+The old GitHub Pages site serves the unbuilt source and doesn't work; use the Vercel URL.
 
-## Why no connection string?
+## Files
 
-Postgres connection strings (`postgresql://user:pass@host/db`) only work
-over a raw TCP protocol that browsers can't speak, and they grant full
-read/write access to everything — so they can never safely live in
-client-side JavaScript that anyone can view via "Inspect Element."
-
-Neon's **Data API** solves this by exposing your tables over plain HTTPS,
-the way you'd call any web API. Security comes from two things instead of a
-password:
-
-- **Row-Level Security (RLS)** in `sql/schema.sql` — the database itself
-  enforces that a user can only read/write rows where `owner_id` matches
-  their own account, no matter what request reaches it.
-- **Neon Auth** — issues each signed-in user a token proving who they are;
-  the Data API checks this token on every request.
-
-This is also why there's a sign-in screen now — without knowing _who_ is
-asking, RLS has nothing to scope access by.
-
-## File overview
-
-| File             | Purpose                                                                                                      |
-| ---------------- | ------------------------------------------------------------------------------------------------------------ |
-| `sql/schema.sql` | Tables + RLS policies. Run once in Neon's SQL editor.                                                        |
-| `src/db.js`      | The only file that talks to Neon. Everything else calls this.                                                |
-| `src/main.js`    | App logic — metronome engine, UI, mastery tracking. Same behavior as before, persistence rewired to `db.js`. |
-| `index.html`     | Markup + styles (unchanged from your original design).                                                       |
-| `.env.example`   | Template for the one secret-free config value you need.                                                      |
+| File | Purpose |
+|---|---|
+| `index.html` | Markup for the four views (sign in, verify, routines, player) |
+| `src/main.js` | UI, audio engine, player, recording, saving |
+| `src/pedal.js` | Pedal gesture timing (tap / double-tap / hold) |
+| `src/records.js` | ✓/✗ tallies and the undo stack |
+| `src/db.js` | All Neon calls (auth + Data API) |
+| `src/style.css`, `src/icons.js` | Styles and the SVG icon set; tokens in `DESIGN.md` |
+| `api/auth-proxy.js` | Same-origin Neon Auth proxy (see above) |
+| `test/` | `node:test` unit tests |
+| `PRODUCT.md`, `DESIGN.md` | Product and design notes |

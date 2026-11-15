@@ -16,7 +16,7 @@
 // origin. Requests without an Origin header are only allowed for GET.
 //
 // REMOVE THIS PROXY once the production domain is added to Neon Auth's
-// trusted domains (Neon console → Auth → Configuration → Domains): delete
+// trusted domains (Neon console, Auth settings): delete
 // this file, its rewrite in vercel.json, and the `useProxy` branch in
 // src/db.js. See README.md.
 // ============================================================
