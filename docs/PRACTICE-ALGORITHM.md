@@ -16,7 +16,7 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Review round 1: probe-tempo cold checks (owned tempo keeps rising), warm-ups don't count, runs never due, settings from the first section that has them, `joined` one-way in sync, plateau counts ✗-only days, Chunk | Run inside the disclosure, due names in the summary, new-day start on load/day change, plainer 22–24px player line
 - [x] Round 1 deploy check
 - [x] Review round 2: daily-check threshold capped (lowered target / manual overshoot), warm-ups before the check don't move the tempo, 44px Chunk | Run buttons
-- [ ] Round 2 deploy check
+- [x] Round 2 deploy check
 
 **Built (phase 1)**
 - Song mode per routine (switch in the routine head), stored as `song: { on, target }` on every section; sections carry `kind` ('chunk' | 'run'), `joined` and `log` (attempts `{ id, t, k, bpm }`, newest 400 kept). No schema change.
