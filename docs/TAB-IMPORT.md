@@ -21,7 +21,7 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Review round 1 M2: cancel token through the play path (Stop/Cancel, section change, closing Tab, leaving the player, the click resuming); "Loading sound… · Cancel" (harness with the soundfont delayed 4 s: nothing plays after it arrives)
 - [x] Review round 1 M3: no tab info → standard notation; drawing errors reject and show "Couldn’t draw this tab" (`notation.musicxml`)
 - [x] Review round 1 minors: m1 no tempo → required; m2 16px paste box; m3 room for 3-digit bar numbers; m4 attribution wording; m5 ragged text tabs lined up, mismatched bar counts rejected; m6 re-attach title confirm; m7 merge only neighbouring chunks
-- [ ] Review round 1 deploy check
+- [x] Review round 1 deploy check (Vercel production d8faa81: success, URL 200, loads without errors)
 
 **Built (as decided 2026-11-15)**
 - Library: alphaTab 1.9.0, imported only by `src/tabview.js`, which only `src/tabload.js` loads (dynamic import), so it is a separate chunk; its worker/worklet go through `@coderline/alphatab-vite`; Bravura and the SONiVOX soundfont are `?url` imports, fetched only when a tab is drawn / Hear it is pressed. The "♪ alphaTab.net" credit alphaTab draws is never hidden: its MPL-2.0 licence doesn't require that, but alphaTab's own notice asks for it (removing it needs the maintainers' permission).
