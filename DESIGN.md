@@ -77,4 +77,4 @@ Owner's complaint: "clunky and overwhelming". Critique: every section showed all
 - [x] Review round 2: clicks/taps on Loop, Song mode, Ramp, Chunk | Run no longer leave focus on the re-drawn control (pedal Enter records, setting unchanged; `p2keys.mjs` checks mouse, touch and keyboard); keyboard focus stays on the same Chunk | Run button; row BPM unit and ramp "to" kept for screen readers
 - [x] Review round 2 deploy check (Vercel production 184ba41: success, URL 200)
 - [x] Close-out: pointer clicks on Play/Pause no longer keep focus (pedal Enter records, playback unchanged); pointer-opened dialogs drop the opener's focus on close, keyboard-opened ones return it (`p2keys.mjs`: Play/Pause mouse + tap, 4 dialogs × Cancel/Escape, keyboard open + Escape)
-- [ ] Close-out deploy check
+- [x] Close-out deploy check (Vercel production 881b120: success, URL 200)
