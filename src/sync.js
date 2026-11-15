@@ -14,6 +14,9 @@
 // section list is written, but each section's stats still come from the
 // server plus our deltas.
 //
+// Song mode `joined` is one-way too: true on either side wins, so a stale
+// structure write can't un-join a chunk another device joined.
+//
 // Song mode attempts: each ✓/✗ in a song routine is also an attempt
 // { id, t, k, bpm } in its section's `log`. Pending attempt changes ride
 // in the same per-section delta as `add` (attempts) and `del` (attempt
@@ -67,6 +70,7 @@ function withCounts(m, serverSection, delta) {
 	const log = mergedLog(serverSection?.log, delta);
 	if (log) out.log = log;
 	else delete out.log;
+	if (serverSection?.joined) out.joined = true; // joining the song is one-way: true wins
 	return out;
 }
 
@@ -102,16 +106,19 @@ export function reconcileSections(localSections, serverSections, pending, keepLo
 			const sm = serverById.get(m.id);
 			m.stats = addStats(sm?.stats, pending.get(m.id));
 			setLog(m, mergedLog(sm?.log, pending.get(m.id)));
+			if (sm?.joined) m.joined = true;
 		}
 		return localSections;
 	}
 	const localById = new Map(localSections.map((m) => [m.id, m]));
 	return serverSections.map((sm) => {
 		const m = localById.get(sm.id) ?? {};
+		const joined = Boolean(m.joined || sm.joined);
 		for (const k of Object.keys(m)) if (!(k in sm)) delete m[k];
 		Object.assign(m, sm);
 		m.stats = addStats(sm.stats, pending.get(sm.id));
 		setLog(m, mergedLog(sm.log, pending.get(sm.id)));
+		if (joined) m.joined = true;
 		return m;
 	});
 }

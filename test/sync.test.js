@@ -426,3 +426,26 @@ test('attempts: reconcile shows server log + pending, non-song sections get no l
 	reconcileSections([a, b], server, new Map(), true);
 	assert.deepEqual(a.log.map((x) => x.id), ['x0', 'x1']);
 });
+
+test('joined is one-way: a stale structure write keeps another device’s join', async () => {
+	const srv = fakeServer();
+	srv.seed(routine());
+	const phone = createSync(srv.api);
+	const laptop = createSync(srv.api);
+	const lPhone = local(srv);
+	const lLaptop = local(srv); // stale: not joined
+	lPhone.metronomes[0].joined = true;
+	phone.markStructure('p1');
+	await phone.flushPractice(lPhone);
+	lLaptop.metronomes[0].startBPM = 90; // laptop edits the tempo (last writer wins)
+	laptop.markStructure('p1');
+	await laptop.flushPractice(lLaptop);
+	const row = srv.rows.get('p1').metronomes[0];
+	assert.equal(row.joined, true);
+	assert.equal(row.startBPM, 90);
+	const shown = reconcileSections(lLaptop.metronomes, srv.rows.get('p1').metronomes, new Map(), true);
+	assert.equal(shown[0].joined, true);
+	const sec = { id: 'a', joined: true };
+	reconcileSections([sec], [{ id: 'a' }], new Map(), false); // server not yet joined: local true stays
+	assert.equal(sec.joined, true);
+});
