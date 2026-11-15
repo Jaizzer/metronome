@@ -75,4 +75,4 @@ Owner's complaint: "clunky and overwhelming". Critique: every section showed all
 - [x] Review round 1: Settings `<summary>` blurred after a click (pedal Enter records, Space pauses; harness check in `p2keys.mjs`); segmented buttons ≥ 44px wide; row names wrap to 2 lines instead of truncating; open row shows the name once; header **+** New routine button
 - [x] Review round 1 deploy check (Vercel production bf3b4b5: success, URL 200)
 - [x] Review round 2: clicks/taps on Loop, Song mode, Ramp, Chunk | Run no longer leave focus on the re-drawn control (pedal Enter records, setting unchanged; `p2keys.mjs` checks mouse, touch and keyboard); keyboard focus stays on the same Chunk | Run button; row BPM unit and ramp "to" kept for screen readers
-- [ ] Review round 2 deploy check
+- [x] Review round 2 deploy check (Vercel production 184ba41: success, URL 200)
