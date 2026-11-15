@@ -2289,6 +2289,21 @@ dialog p {
 	stroke: var(--amber);
 }
 
+/* The Tab player's shell (its view styles load with it: tabplayer.css). */
+.tabplayer {
+	height: 100dvh;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+#tp-main {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
 /* ---------- Phones ---------- */
 
 @media (max-width: 560px) {

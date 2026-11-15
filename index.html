@@ -193,6 +193,16 @@
 		<div id="import-main" class="import-main"></div>
 	</section>
 
+	<!-- ───────────── Tab player (src/tabplayer.js, loaded on demand) ───────────── -->
+	<section id="tabplayer" class="tabplayer" hidden>
+		<header class="player-top">
+			<button id="tp-exit" class="btn btn-quiet" type="button">Exit</button>
+			<h1 id="tp-title" class="player-title" tabindex="-1">Tab</h1>
+			<span id="tp-pos" class="player-pos"></span>
+		</header>
+		<div id="tp-main" class="tp-view"></div>
+	</section>
+
 	<dialog id="modal" aria-labelledby="modal-title">
 		<h2 id="modal-title"></h2>
 		<div id="modal-content"></div>

@@ -6,12 +6,13 @@ Running checklist so work can resume after an interruption (update it with every
 
 - [x] Spec (this file)
 - [x] Pure rules `src/tabplayerlogic.js` + `test/tabplayer.test.js` (taps → cursor/selection, [ ], arrows, speed → BPM label, chunk chips + matching, new chunk section, ticks ↔ bars, key mapping)
-- [ ] Lazy `src/tabplayer.js` view: whole track with alphaTab's cursor + auto-scroll, track picker, transport, selection/loop, chips, mute/solo
-- [ ] Entry points: builder Options **Play tab**, player Tab disclosure **Open full tab**; missing file → Import again
-- [ ] Keys (Space / pedal Enter / ← → / [ ] / Escape), blur after pointer clicks
-- [ ] Practice this chunk / Add as a new chunk (confirm)
-- [ ] Audio: app click paused while the Tab player is open, never both; cancel token; shared soundfont bytes
-- [ ] Harness `tabplayer.mjs` + old scripts, screenshots 390 / 820 / 1280
+- [x] Lazy `src/tabplayer.js` view: whole track with alphaTab's cursor + auto-scroll, track picker, transport, selection/loop, chips, mute/solo
+- [x] Entry points: builder Options **Play tab**, player Tab disclosure **Open full tab**; missing file → Import again
+- [x] Keys (Space / pedal Enter / ← → / [ ] / Escape), blur after pointer clicks
+- [x] Practice this chunk / Add as a new chunk (confirm)
+- [x] Audio: app click paused while the Tab player is open, never both; cancel token; shared soundfont bytes
+- [x] Harness `tabplayer.mjs` (all pass), screenshots 390 / 820 / 1280
+- [ ] Old harness scripts re-run (tabflow, p2keys, p2extra pass; slidetest, songflow, a11y, tabfix, stops33 running)
 - [ ] README + DESIGN.md
 - [ ] Deploy check
 

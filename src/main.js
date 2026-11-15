@@ -35,7 +35,7 @@ import { icons } from './icons.js';
 import { h, iconEl } from './dom.js';
 import { createImporter } from './importer.js';
 import { createTabPanel } from './tabpanel.js';
-import { saveTab, deleteTab, tabRecord } from './tabstore.js';
+import { saveTab, deleteTab, tabRecord, routineTab } from './tabstore.js';
 import { barRange } from './slicer.js';
 import {
 	newAttemptId,
@@ -464,7 +464,7 @@ window.addEventListener('online', () => scheduleCountFlushes(0));
 
 // ---------------- Views + toast ----------------
 
-const VIEWS = ['auth', 'verify', 'builder', 'player', 'importer'];
+const VIEWS = ['auth', 'verify', 'builder', 'player', 'importer', 'tabplayer'];
 let view = 'auth';
 
 function showView(name) {
@@ -978,6 +978,12 @@ window.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape' && !e.target.closest?.('details[open] textarea')) importer.close();
 		return;
 	}
+	// The Tab player: Space and the pedal's Enter play/pause there (no ✓/✗).
+	if (view === 'tabplayer') {
+		const action = tabPlayer ? tabPlayer.keydown(e) : e.key === 'Escape' ? 'exit' : null;
+		if (action === 'exit') closeTabPlayer();
+		return;
+	}
 
 	// Foot pedal (sends Enter). Handled on keydown + keyup in pedal.js.
 	if (e.key === 'Enter') {
@@ -1007,7 +1013,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('keyup', (e) => {
-	if (e.key === 'Enter') pedal.keyup();
+	if (e.key === 'Enter' && view !== 'tabplayer') pedal.keyup();
 });
 window.addEventListener('blur', () => pedal.cancelPress());
 
@@ -1392,7 +1398,7 @@ document.addEventListener('visibilitychange', () => {
 	if (document.visibilityState === 'visible' && view === 'player') requestWakeLock();
 });
 
-function startRoutine(p) {
+function startRoutine(p, index = 0) {
 	if (!p.metronomes.length) return toast('Add a section first');
 	initAudio();
 	prepareSongSession(p);
@@ -1400,7 +1406,7 @@ function startRoutine(p) {
 	isPaused = false;
 	renderPlayButton();
 	showView('player');
-	runSection(0);
+	runSection(index);
 	requestWakeLock();
 	// Focus somewhere neutral: Enter (the pedal) must record, not press a button.
 	$('player-title').focus();
@@ -2034,9 +2040,16 @@ function renderRoutine(p, pIdx) {
 		'Song mode',
 	);
 
+	const playable = routineTab(p)?.format === 'score';
 	const options = h(
 		'div',
 		{ class: 'routine-options', id: optsId, hidden: !optsOpen },
+		playable &&
+			h(
+				'div',
+				{ class: 'opt-row' },
+				h('button', { class: 'play-tab btn', type: 'button', onclick: () => openTabPlayer(p) }, iconEl('tab'), 'Play tab'),
+			),
 		h('div', { class: 'opt-row' }, loopSwitch, songSwitch, songOn && targetField(p)),
 		h(
 			'div',
@@ -2386,6 +2399,10 @@ const importer = createImporter({
 const tabPanel = createTabPanel({
 	toast,
 	confirm: confirmDialog,
+	openFull: () => activePractice && openTabPlayer(activePractice),
+	attached: (p) => {
+		if (view === 'tabplayer' && tabPlayerFor === p) tabPlayer?.reload();
+	},
 	liveBpm: () => currentBPM,
 	// "Hear it" pauses the click and resumes it afterwards (if it was running).
 	pauseClick: () => {
@@ -2397,6 +2414,110 @@ const tabPanel = createTabPanel({
 		if (isPaused && view === 'player') togglePause();
 	},
 });
+
+// ---------------- Tab player (docs/TAB-PLAYER.md) ----------------
+// A full-screen view loaded on demand (src/tabplayer.js + alphaTab). The
+// app's click never plays with it: opening pauses the click (and Hear it),
+// and returning to the player leaves it paused.
+
+let tabPlayer = null;
+let tabPlayerFor = null; // the routine
+let tabPlayerFrom = 'builder'; // the view Exit returns to
+let tabPlayerToken = 0;
+let tabPlayerWake = false;
+
+function pauseClickForTab() {
+	tabPanel.stop();
+	if (view === 'player' || tabPlayerFrom === 'player') {
+		if (activePractice && !isPaused) togglePause();
+	}
+}
+
+async function openTabPlayer(p) {
+	if (view === 'tabplayer') return;
+	const my = ++tabPlayerToken;
+	tabPlayerFrom = view === 'player' ? 'player' : 'builder';
+	pauseClickForTab();
+	tabPlayerFor = p;
+	$('tp-title').textContent = p.name;
+	$('tp-pos').textContent = '';
+	$('tp-main').replaceChildren(h('p', { class: 'tab-note tp-status' }, 'Loading the tab player…'));
+	showView('tabplayer');
+	$('tp-title').focus();
+	if (!wakeLock) {
+		tabPlayerWake = true;
+		requestWakeLock();
+	}
+	let mod;
+	try {
+		mod = await import('./tabplayer.js');
+	} catch (e) {
+		console.error('Tab player failed to load:', e);
+		if (my === tabPlayerToken) $('tp-main').replaceChildren(h('p', { class: 'tab-note', role: 'alert' }, 'The tab player couldn’t load. Check your connection and try again.'));
+		return;
+	}
+	if (my !== tabPlayerToken || view !== 'tabplayer') return;
+	tabPlayer = mod.createTabPlayer({
+		p,
+		root: $('tp-main'),
+		posEl: $('tp-pos'),
+		source: () => tabPanel.sourceFor(p),
+		toast,
+		confirm: confirmDialog,
+		pickFile: () => tabPanel.pickFile(p),
+		beforePlay: pauseClickForTab,
+		practice: (index) => practiceFromTab(p, index),
+		makeId: newSectionId,
+		insertSection: (section, index) => insertSectionFromTab(p, section, index),
+	});
+}
+
+// Exit: stop the tab audio and go back. The click stays paused.
+function closeTabPlayer({ to = tabPlayerFrom } = {}) {
+	tabPlayerToken++;
+	tabPlayer?.destroy();
+	tabPlayer = null;
+	tabPlayerFor = null;
+	if (tabPlayerWake && to !== 'player') {
+		wakeLock?.release?.().catch(() => {});
+		wakeLock = null;
+	}
+	tabPlayerWake = false;
+	if (to === 'player' && activePractice) {
+		showView('player');
+		updatePlayerUI();
+		$('player-title').focus();
+	} else {
+		showView('builder');
+		renderBuilder();
+	}
+}
+
+// "Practice this chunk": the normal player on that section, playing.
+function practiceFromTab(p, index) {
+	const fromPlayer = tabPlayerFrom === 'player' && activePractice === p;
+	closeTabPlayer({ to: fromPlayer ? 'player' : 'builder' });
+	if (fromPlayer) {
+		if (isPaused) togglePause();
+		runSection(index);
+	} else {
+		if (activePractice) stopEverything();
+		startRoutine(p, index);
+	}
+}
+
+// "Add as a new chunk" (confirmed): the Tab player builds the section
+// (tabplayerlogic.newChunkSection); it is saved like any section edit.
+function insertSectionFromTab(p, section, i) {
+	p.metronomes.splice(i, 0, section);
+	if (activePractice === p && activeMetIndex >= i) activeMetIndex++;
+	savePractice(p);
+	toast(`Added ${section.name}`, '', 2000);
+	return i;
+}
+
+$('tp-exit').onclick = () => closeTabPlayer();
+$('tp-exit').replaceChildren(iconEl('back'), 'Exit');
 
 $('importTabBtn').onclick = () => importer.open();
 $('importTabBtn').replaceChildren(iconEl('importFile'), 'Import tab');

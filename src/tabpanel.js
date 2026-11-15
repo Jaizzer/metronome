@@ -30,7 +30,8 @@ function remember(open) {
 	}
 }
 
-// opts: { toast, pauseClick() → wasRunning, resumeClick(), liveBpm() }
+// opts: { toast, confirm, pauseClick() → wasRunning, resumeClick(), liveBpm(),
+//         openFull() (the Tab player), attached(p) (a file was re-attached) }
 export function createTabPanel(opts) {
 	const panel = $('tab-panel');
 	const body = $('tab-body');
@@ -40,6 +41,7 @@ export function createTabPanel(opts) {
 	let viewHost = null;
 	let token = 0;
 	let hearing = false;
+	let pickFor = null; // the routine "Import again" was pressed for (player or Tab player)
 
 	panel.open = remembered();
 	panel.addEventListener('toggle', () => {
@@ -52,7 +54,9 @@ export function createTabPanel(opts) {
 	input.addEventListener('change', () => {
 		const file = input.files?.[0];
 		input.value = '';
-		if (file && current) reattach(current.p, file);
+		const p = pickFor ?? current?.p;
+		pickFor = null;
+		if (file && p) reattach(p, file);
 	});
 	document.body.append(input);
 
@@ -121,7 +125,7 @@ export function createTabPanel(opts) {
 					'div',
 					{ class: 'tab-missing' },
 					h('p', {}, 'Tab file not on this device'),
-					h('button', { class: 'btn', type: 'button', id: 'tab-reattach', onclick: () => input.click() }, iconEl('importFile'), 'Import again'),
+					h('button', { class: 'btn', type: 'button', id: 'tab-reattach', onclick: () => pickFile(null) }, iconEl('importFile'), 'Import again'),
 				),
 			);
 			return;
@@ -148,6 +152,7 @@ export function createTabPanel(opts) {
 					'div',
 					{ class: 'tab-tools' },
 					h('button', { class: 'btn', type: 'button', id: 'tab-hear', 'aria-pressed': 'false', onclick: hear }),
+					h('button', { class: 'btn btn-quiet', type: 'button', id: 'tab-full', onclick: () => opts.openFull?.() }, iconEl('expand'), 'Open full tab'),
 					h('span', { id: 'tab-status', class: 'tab-status', 'aria-live': 'polite' }),
 				),
 				viewHost,
@@ -213,6 +218,12 @@ export function createTabPanel(opts) {
 		view?.stop();
 	}
 
+	// "Import again" (p: the routine, null = the player's section).
+	function pickFile(p) {
+		pickFor = p;
+		input.click();
+	}
+
 	function dropView() {
 		view?.destroy();
 		view = null;
@@ -243,6 +254,7 @@ export function createTabPanel(opts) {
 				cache.set(p.id, Promise.resolve(src));
 				opts.toast('Tab attached', '', 2000);
 				if (current?.p === p) render();
+				opts.attached?.(p);
 			} catch (e) {
 				opts.toast(e.message || String(e), 'error', 4000);
 			}
@@ -260,6 +272,8 @@ export function createTabPanel(opts) {
 	return {
 		update,
 		stop,
+		sourceFor,
+		pickFile,
 		get hearing() {
 			return hearing;
 		},

@@ -15,6 +15,25 @@ import { playedRange, playedBars, TICKS_PER_QUARTER } from './tabscore.js';
 
 alphaTab.Logger.logLevel = alphaTab.LogLevel.Warning;
 
+export { alphaTab };
+
+// The soundfont (1.35 MB) is fetched once per session and shared by every
+// player (Hear it, the Tab player): alphaTab copies the bytes it is given.
+let soundFontPending = null;
+export function soundFontBytes() {
+	soundFontPending ??= fetch(soundFontUrl)
+		.then((r) => {
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			return r.arrayBuffer();
+		})
+		.then((b) => new Uint8Array(b))
+		.catch((e) => {
+			soundFontPending = null; // try again next time
+			throw e;
+		});
+	return soundFontPending;
+}
+
 // Read a Guitar Pro (3–7, .gpx), MusicXML (.musicxml, .xml, .mxl) or
 // Capella file. Throws a plain-language error when it can't.
 export function parseScore(bytes) {
@@ -52,7 +71,7 @@ const HIDDEN = [
 	'ChordDiagrams',
 ];
 
-function makeSettings(scale) {
+export function makeSettings(scale) {
 	const s = new alphaTab.Settings();
 	s.core.useWorkers = false; // a few bars render fast on the main thread
 	s.core.enableLazyLoading = false; // draw every bar now, not when scrolled into view
@@ -68,12 +87,16 @@ function makeSettings(scale) {
 	for (const [k, v] of Object.entries(INK)) s.display.resources[k] = alphaTab.model.Color.fromJson(v);
 	for (const k of HIDDEN) s.notation.elements.set(alphaTab.NotationElement[k], false);
 	s.player.playerMode = alphaTab.PlayerMode.Disabled; // the soundfont loads only on "Hear it"
-	s.player.soundFont = soundFontUrl;
+	s.player.soundFont = null; // given as bytes (soundFontBytes), shared with the Tab player
 	s.player.enableCursor = true;
 	s.player.enableUserInteraction = false;
 	s.player.scrollMode = alphaTab.ScrollMode.Off;
 	return s;
 }
+
+// Drawn as tab when the staff has strings and frets, else as notation.
+export const profileFor = (score, track) =>
+	(score.tracks[track]?.staves?.[0]?.tuning?.length ?? 0) > 0 ? alphaTab.StaveProfile.Tab : alphaTab.StaveProfile.Score;
 
 // A tab view inside `container`. show() draws bars [start, end] of one
 // track; hear() plays what's shown and resolves when it ends or stops.
@@ -132,7 +155,9 @@ export function createTabView(container, { scale = 0.9 } = {}) {
 		if (ready) return ready;
 		let offs = [];
 		let timer;
+		let failLoad = null;
 		ready = new Promise((resolve, reject) => {
+			failLoad = reject;
 			offs = [
 				api.playerReady.on(() => resolve()),
 				// A soundfont that can't be fetched (offline) surfaces as an API error.
@@ -153,12 +178,15 @@ export function createTabView(container, { scale = 0.9 } = {}) {
 		api.settings.player.playerMode = alphaTab.PlayerMode.EnabledSynthesizer;
 		api.updateSettings();
 		api.render();
+		const fail = new Error('The sound for “Hear it” couldn’t be loaded. Check your connection.');
+		soundFontBytes().then(
+			(bytes) => {
+				if (!api.loadSoundFont(bytes)) failLoad?.(fail);
+			},
+			() => failLoad?.(fail),
+		);
 		return ready;
 	}
-
-	// Drawn as tab when the staff has strings and frets, else as notation.
-	const profileFor = (score, track) =>
-		(score.tracks[track]?.staves?.[0]?.tuning?.length ?? 0) > 0 ? alphaTab.StaveProfile.Tab : alphaTab.StaveProfile.Score;
 
 	return {
 		api,
