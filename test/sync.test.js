@@ -281,3 +281,148 @@ test('dropCounts clears memory and reports an empty state', () => {
 	assert.equal(tab.isEmptyState(saved.at(-1)), true);
 	assert.deepEqual(tab.pendingPracticeIds(), []);
 });
+
+// ---------- Song mode attempts (log add/del) ----------
+
+const att = (id, k = 's', bpm = 100, t = 1) => ({ id, t, k, bpm });
+const logIds = (srv, i = 0) => (srv.rows.get('p1').metronomes[i].log ?? []).map((a) => a.id);
+
+test('attempts: two stale tabs adding attempts both survive', async () => {
+	const srv = fakeServer();
+	srv.seed(routine());
+	const tab1 = createSync(srv.api);
+	const tab2 = createSync(srv.api);
+	const l1 = local(srv);
+	const l2 = local(srv);
+	tab1.addSectionDelta('p1', 'a', 's', 1);
+	tab1.addAttempt('p1', 'a', att('x1', 's', 100, 1));
+	tab2.addSectionDelta('p1', 'a', 'f', 1);
+	tab2.addAttempt('p1', 'a', att('y1', 'f', 100, 2));
+	await tab1.flushPractice(l1);
+	await tab2.flushPractice(l2);
+	assert.deepEqual(logIds(srv), ['x1', 'y1']);
+	assert.deepEqual(srv.rows.get('p1').metronomes[0].stats, { s: 1, f: 1 });
+});
+
+test('attempts: a structure edit in one tab keeps the other tab’s attempts', async () => {
+	const srv = fakeServer();
+	srv.seed(routine());
+	const tab1 = createSync(srv.api);
+	const tab2 = createSync(srv.api);
+	const l2 = local(srv); // stale, no attempts
+	tab1.addAttempt('p1', 'a', att('x1'));
+	await tab1.flushPractice(local(srv));
+	l2.metronomes[0].startBPM = 104;
+	l2.metronomes[0].log = []; // stale display must not be written
+	tab2.markStructure('p1');
+	tab2.addAttempt('p1', 'a', att('y1', 's', 100, 2));
+	await tab2.flushPractice(l2);
+	assert.equal(srv.rows.get('p1').metronomes[0].startBPM, 104);
+	assert.deepEqual(logIds(srv), ['x1', 'y1']);
+});
+
+test('attempts: undo (del) removes only that id, saved or not', async () => {
+	const srv = fakeServer();
+	srv.seed(routine());
+	const tab = createSync(srv.api);
+	tab.addAttempt('p1', 'a', att('x1', 's', 100, 1));
+	tab.addAttempt('p1', 'a', att('x2', 's', 100, 2));
+	await tab.flushPractice(local(srv));
+	tab.addAttempt('p1', 'a', att('x3', 'f', 100, 3));
+	tab.removeAttempt('p1', 'a', 'x3'); // never saved
+	tab.removeAttempt('p1', 'a', 'x2'); // already saved
+	await tab.flushPractice(local(srv));
+	assert.deepEqual(logIds(srv), ['x1']);
+	assert.equal(tab.hasPending('p1'), false);
+});
+
+test('attempts: a lost-response retry does not duplicate attempts', async () => {
+	const srv = fakeServer();
+	srv.seed(routine());
+	const tab = createSync(srv.api);
+	tab.addSectionDelta('p1', 'a', 's', 1);
+	tab.addAttempt('p1', 'a', att('x1'));
+	// Another device writes right after ours landed, so the counts don't match:
+	// the attempt id still proves it landed.
+	const orig = srv.api.casUpdatePractice;
+	srv.api.casUpdatePractice = async (...args) => {
+		srv.api.casUpdatePractice = orig;
+		await orig(...args);
+		const row = srv.rows.get('p1');
+		row.metronomes[0].stats = { s: 9, f: 9 };
+		row.updated_at = 'other';
+		throw new TypeError('Failed to fetch');
+	};
+	await assert.rejects(tab.flushPractice(local(srv)));
+	assert.equal(tab.hasPending('p1'), false);
+	await tab.flushPractice(local(srv));
+	assert.deepEqual(logIds(srv), ['x1']);
+	assert.deepEqual(srv.rows.get('p1').metronomes[0].stats, { s: 9, f: 9 });
+});
+
+test('attempts: lost response that did not land is re-sent once', async () => {
+	const srv = fakeServer();
+	srv.seed(routine());
+	const tab = createSync(srv.api);
+	tab.addAttempt('p1', 'b', att('x1'));
+	dropResponse(srv, 'casUpdatePractice', { lands: false });
+	await assert.rejects(tab.flushPractice(local(srv)));
+	assert.equal(tab.hasPending('p1'), true);
+	await tab.flushPractice(local(srv));
+	assert.deepEqual(logIds(srv, 1), ['x1']);
+});
+
+test('attempts: added mid-flight stay pending', async () => {
+	const srv = fakeServer();
+	srv.seed(routine());
+	const tab = createSync(srv.api);
+	tab.addAttempt('p1', 'a', att('x1', 's', 100, 1));
+	const orig = srv.api.casUpdatePractice;
+	srv.api.casUpdatePractice = async (...args) => {
+		tab.addAttempt('p1', 'a', att('x2', 's', 100, 2));
+		srv.api.casUpdatePractice = orig;
+		return orig(...args);
+	};
+	await tab.flushPractice(local(srv));
+	assert.deepEqual(logIds(srv), ['x1']);
+	assert.deepEqual(tab.pendingFor('p1').get('a').add.map((a) => a.id), ['x2']);
+	await tab.flushPractice(local(srv));
+	assert.deepEqual(logIds(srv), ['x1', 'x2']);
+});
+
+test('attempts: export → import round-trip, union without doubles, applied once', async () => {
+	const srv = fakeServer();
+	srv.seed(routine());
+	const saved = [];
+	const closing = createSync(srv.api, (st) => saved.push(st));
+	closing.addSectionDelta('p1', 'a', 's', 1);
+	closing.addAttempt('p1', 'a', att('x1', 's', 100, 1));
+	closing.addAttempt('p1', 'a', att('x2', 'f', 100, 2));
+	closing.removeAttempt('p1', 'a', 'x2');
+	const stored = JSON.parse(JSON.stringify(saved.at(-1)));
+	assert.deepEqual(stored.sections.p1.a, { s: 1, f: 0, add: [att('x1', 's', 100, 1)], del: ['x2'] });
+
+	const next = createSync(srv.api);
+	next.importState(stored);
+	next.importState(stored); // the same state claimed twice: attempts don't double
+	assert.deepEqual(next.pendingFor('p1').get('a').add.map((a) => a.id), ['x1']);
+	await next.flushPractice(local(srv));
+	assert.deepEqual(logIds(srv), ['x1']);
+	assert.equal(next.isEmptyState(next.exportState()), true);
+});
+
+test('attempts: reconcile shows server log + pending, non-song sections get no log', () => {
+	const a = { id: 'a', name: 'A' };
+	const b = { id: 'b', name: 'B' };
+	const pending = new Map([['a', { s: 1, f: 0, add: [att('x2', 's', 100, 2)], del: ['x0'] }]]);
+	const server = [
+		{ id: 'a', name: 'A', log: [att('x0', 's', 100, 0), att('x1', 'f', 100, 1)] },
+		{ id: 'b', name: 'B' },
+	];
+	const out = reconcileSections([a, b], server, pending, false);
+	assert.equal(out[0], a);
+	assert.deepEqual(a.log.map((x) => x.id), ['x1', 'x2']);
+	assert.equal('log' in b, false);
+	reconcileSections([a, b], server, new Map(), true);
+	assert.deepEqual(a.log.map((x) => x.id), ['x0', 'x1']);
+});

@@ -14,12 +14,21 @@
 // section list is written, but each section's stats still come from the
 // server plus our deltas.
 //
+// Song mode attempts: each ✓/✗ in a song routine is also an attempt
+// { id, t, k, bpm } in its section's `log`. Pending attempt changes ride
+// in the same per-section delta as `add` (attempts) and `del` (attempt
+// ids). They merge by id (engine.mergeLog), so re-sending is harmless and
+// a local structure edit never overwrites another device's attempts: the
+// written log is always the server's log plus our pending add/del.
+//
 // Sections are matched by an `id` stored inside each section object in the
 // `metronomes` jsonb (no schema change). Older sections without one get a
 // positional id (`idx-<n>`) so every tab derives the same ids for them.
 //
 // No DOM and no Neon here: main.js injects the API, tests inject a fake.
 // ============================================================
+
+import { mergeLog } from './engine.js';
 
 export const MAX_CAS_RETRIES = 6;
 
@@ -44,6 +53,23 @@ export function ensureSectionIds(sections) {
 
 export const newSectionId = () => crypto.randomUUID();
 
+// Server log + pending attempt changes, or undefined when the section has
+// neither (non-song sections never get a `log` key).
+export function mergedLog(serverLog, delta) {
+	if (!serverLog && !delta?.add?.length && !delta?.del?.length) return undefined;
+	return mergeLog(serverLog ?? [], delta?.add ?? [], delta?.del ?? []);
+}
+
+// Section as written/shown: its own fields, with stats and log taken from
+// the server value plus pending changes.
+function withCounts(m, serverSection, delta) {
+	const out = { ...m, stats: addStats(serverSection?.stats, delta) };
+	const log = mergedLog(serverSection?.log, delta);
+	if (log) out.log = log;
+	else delete out.log;
+	return out;
+}
+
 // What to write for one routine, given the fresh server row.
 export function mergeForWrite({ server, local, deltas, structDirty }) {
 	const serverById = new Map((server.metronomes ?? []).map((m) => [m.id, m]));
@@ -51,17 +77,19 @@ export function mergeForWrite({ server, local, deltas, structDirty }) {
 		return {
 			name: local.name,
 			loop: local.loop,
-			metronomes: local.metronomes.map((m) => ({
-				...m,
-				stats: addStats(serverById.get(m.id)?.stats, deltas.get(m.id)),
-			})),
+			metronomes: local.metronomes.map((m) => withCounts(m, serverById.get(m.id), deltas.get(m.id))),
 		};
 	}
 	return {
 		name: server.name,
 		loop: server.loop,
-		metronomes: (server.metronomes ?? []).map((m) => ({ ...m, stats: addStats(m.stats, deltas.get(m.id)) })),
+		metronomes: (server.metronomes ?? []).map((m) => withCounts(m, m, deltas.get(m.id))),
 	};
+}
+
+function setLog(m, log) {
+	if (log) m.log = log;
+	else delete m.log;
 }
 
 // Bring local section objects in line with what the server holds, keeping
@@ -70,7 +98,11 @@ export function mergeForWrite({ server, local, deltas, structDirty }) {
 export function reconcileSections(localSections, serverSections, pending, keepLocalStructure) {
 	const serverById = new Map(serverSections.map((m) => [m.id, m]));
 	if (keepLocalStructure) {
-		for (const m of localSections) m.stats = addStats(serverById.get(m.id)?.stats, pending.get(m.id));
+		for (const m of localSections) {
+			const sm = serverById.get(m.id);
+			m.stats = addStats(sm?.stats, pending.get(m.id));
+			setLog(m, mergedLog(sm?.log, pending.get(m.id)));
+		}
 		return localSections;
 	}
 	const localById = new Map(localSections.map((m) => [m.id, m]));
@@ -79,6 +111,7 @@ export function reconcileSections(localSections, serverSections, pending, keepLo
 		for (const k of Object.keys(m)) if (!(k in sm)) delete m[k];
 		Object.assign(m, sm);
 		m.stats = addStats(sm.stats, pending.get(sm.id));
+		setLog(m, mergedLog(sm.log, pending.get(sm.id)));
 		return m;
 	});
 }
@@ -101,8 +134,16 @@ export function reconcileSections(localSections, serverSections, pending, keepLo
  * values equal to what we expected → it did (don't apply twice); anything
  * else → assume it didn't and apply again later.
  */
+// Deep copy of a pending delta (its arrays keep changing after a snapshot).
+function cloneDelta(d) {
+	const out = { s: d.s, f: d.f };
+	if (d.add?.length) out.add = d.add.map((a) => ({ ...a }));
+	if (d.del?.length) out.del = [...d.del];
+	return out;
+}
+
 export function createSync(api, onChange = () => {}) {
-	let sectionDeltas = new Map(); // practiceId → Map(sectionId → { s, f })
+	let sectionDeltas = new Map(); // practiceId → Map(sectionId → { s, f, add?, del? })
 	const structVersion = new Map(); // practiceId → edit counter (absent = clean)
 	const totalsDelta = { s: 0, f: 0 };
 	let inflight = []; // writes sent whose outcome we haven't confirmed
@@ -118,6 +159,27 @@ export function createSync(api, onChange = () => {}) {
 		const m = deltasFor(pid);
 		const d = m.get(sid) ?? { s: 0, f: 0 };
 		d[kind] += n;
+		m.set(sid, d);
+		changed();
+	}
+
+	// Song mode: a new attempt, or the removal of one (undo).
+	function addAttempt(pid, sid, attempt) {
+		const m = deltasFor(pid);
+		const d = m.get(sid) ?? { s: 0, f: 0 };
+		d.add = [...(d.add ?? []).filter((a) => a.id !== attempt.id), attempt];
+		if (d.del) d.del = d.del.filter((id) => id !== attempt.id);
+		m.set(sid, d);
+		changed();
+	}
+
+	// Always sent as a del too: the attempt may already be on the server
+	// (or in a write whose answer we haven't seen yet).
+	function removeAttempt(pid, sid, attemptId) {
+		const m = deltasFor(pid);
+		const d = m.get(sid) ?? { s: 0, f: 0 };
+		if (d.add) d.add = d.add.filter((a) => a.id !== attemptId);
+		d.del = [...new Set([...(d.del ?? []), attemptId])];
 		m.set(sid, d);
 		changed();
 	}
@@ -139,7 +201,7 @@ export function createSync(api, onChange = () => {}) {
 		return sectionDeltas.get(pid) ?? new Map();
 	}
 
-	const nonZero = (d) => d && (d.s || d.f);
+	const nonZero = (d) => Boolean(d && (d.s || d.f || d.add?.length || d.del?.length));
 
 	function hasPending(pid) {
 		return (
@@ -176,7 +238,7 @@ export function createSync(api, onChange = () => {}) {
 	function exportState() {
 		const sections = {};
 		for (const [pid, m] of sectionDeltas) {
-			for (const [sid, d] of m) if (nonZero(d)) (sections[pid] ??= {})[sid] = { ...d };
+			for (const [sid, d] of m) if (nonZero(d)) (sections[pid] ??= {})[sid] = cloneDelta(d);
 		}
 		return { sections, totals: { ...totalsDelta }, inflight: JSON.parse(JSON.stringify(inflight)) };
 	}
@@ -192,7 +254,14 @@ export function createSync(api, onChange = () => {}) {
 			for (const [sid, d] of Object.entries(secs)) {
 				const m = deltasFor(pid);
 				const cur = m.get(sid) ?? { s: 0, f: 0 };
-				m.set(sid, { s: cur.s + (d.s | 0), f: cur.f + (d.f | 0) });
+				const next = { s: cur.s + (d.s | 0), f: cur.f + (d.f | 0) };
+				// Attempts are unions by id, never counted twice.
+				const add = new Map([...(cur.add ?? []), ...(d.add ?? [])].map((a) => [a.id, a]));
+				const del = new Set([...(cur.del ?? []), ...(d.del ?? [])]);
+				for (const id of del) add.delete(id);
+				if (add.size) next.add = [...add.values()];
+				if (del.size) next.del = [...del];
+				m.set(sid, next);
 			}
 		}
 		totalsDelta.s += st.totals?.s | 0;
@@ -217,7 +286,13 @@ export function createSync(api, onChange = () => {}) {
 			if (!cur) continue;
 			cur.s -= d.s;
 			cur.f -= d.f;
-			if (!cur.s && !cur.f) m.delete(sid);
+			const sentAdd = new Set((d.add ?? []).map((a) => a.id));
+			const sentDel = new Set(d.del ?? []);
+			if (cur.add) cur.add = cur.add.filter((a) => !sentAdd.has(a.id));
+			if (cur.del) cur.del = cur.del.filter((id) => !sentDel.has(id));
+			if (!cur.add?.length) delete cur.add;
+			if (!cur.del?.length) delete cur.del;
+			if (!nonZero(cur)) m.delete(sid);
 		}
 	}
 
@@ -239,10 +314,20 @@ export function createSync(api, onChange = () => {}) {
 			const row = await api.fetchPractice(w.id);
 			if (!row) return settle(w, false);
 			if (row.updated_at === w.prev) return settle(w, false);
-			const byId = new Map((row.metronomes ?? []).map((m) => [m.id, m.stats ?? {}]));
+			const byId = new Map((row.metronomes ?? []).map((m) => [m.id, m]));
+			// Our own attempt ids are proof: only this write can have put
+			// them there. Without any, fall back to comparing the counts.
+			let proof = null;
+			for (const [sid, d] of Object.entries(w.snapshot)) {
+				const ids = new Set((byId.get(sid)?.log ?? []).map((a) => a.id));
+				for (const a of d.add ?? []) proof = proof === false ? false : ids.has(a.id);
+			}
+			if (proof !== null) return settle(w, proof);
 			const landed = Object.entries(w.expected).every(([sid, e]) => {
-				const st = byId.get(sid);
-				return st && (st.s | 0) === e.s && (st.f | 0) === e.f;
+				const st = byId.get(sid)?.stats;
+				const gone = new Set(w.snapshot[sid]?.del ?? []);
+				const logOk = !(byId.get(sid)?.log ?? []).some((a) => gone.has(a.id));
+				return st && (st.s | 0) === e.s && (st.f | 0) === e.f && logOk;
 			});
 			return settle(w, landed);
 		}
@@ -284,7 +369,7 @@ export function createSync(api, onChange = () => {}) {
 			ensureSectionIds(server.metronomes ?? []);
 			// Snapshot after the await so it matches `local` exactly.
 			const snapshot = {};
-			for (const [sid, d] of pendingFor(pid)) if (nonZero(d)) snapshot[sid] = { ...d };
+			for (const [sid, d] of pendingFor(pid)) if (nonZero(d)) snapshot[sid] = cloneDelta(d);
 			const version = structVersion.get(pid);
 			const patch = mergeForWrite({ server, local, deltas: new Map(Object.entries(snapshot)), structDirty: version !== undefined });
 			const expected = {};
@@ -317,6 +402,8 @@ export function createSync(api, onChange = () => {}) {
 	return {
 		addSectionDelta,
 		addTotalsDelta,
+		addAttempt,
+		removeAttempt,
 		markStructure,
 		isStructDirty,
 		pendingFor,

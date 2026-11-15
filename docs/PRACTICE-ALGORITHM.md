@@ -5,7 +5,7 @@
 Running checklist so work can resume after an interruption (update it with every commit).
 
 - [x] `src/engine.js`: pure logic + tests (`test/engine.test.js`)
-- [ ] Sync: attempts (`log`) as idempotent add/del deltas in `src/sync.js` + tests
+- [x] Sync: attempts (`log`) as idempotent add/del deltas in `src/sync.js` + tests
 - [ ] Recording: attempt per ✓/✗ in song-mode routines, undo removes it
 - [ ] Ladder after each chunk attempt (up/down/shrink toasts + tone), join the song
 - [ ] startRoutine: chunks start at their owned tempo (capped) on a new day
