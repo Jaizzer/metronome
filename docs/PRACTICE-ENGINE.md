@@ -1,5 +1,7 @@
 # Practice engine: ✓/✗ drive what you practise and at what tempo
 
+> **Superseded in part (2026-11-15):** scoring, tempo and planner rules are replaced by `PRACTICE-ALGORITHM.md` (v2, research-based). Takes, auto-judge and display notes below still apply.
+
 Design agreed in conversation 2026-11-15 (owner's 80% / 30-attempt rule, improved). Defaults stand unless the owner changes them by 2026-11-17. Supersedes "Block mode" in TAKES-PLAN.md.
 
 ## Units
