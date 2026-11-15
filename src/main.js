@@ -437,6 +437,7 @@ function undoLast() {
 	refreshStats();
 
 	const good = entry.kind === 's';
+	$(good ? 'success-zone' : 'fail-zone').classList.remove('is-struck');
 	strike(good ? 'success-zone' : 'fail-zone', 'is-undone', 900);
 	const msg = h(
 		'span',
@@ -459,8 +460,9 @@ function strike(id, cls, ms) {
 	el.classList.remove(cls);
 	void el.offsetWidth;
 	el.classList.add(cls);
-	clearTimeout(el._strikeTimer);
-	el._strikeTimer = setTimeout(() => el.classList.remove(cls), ms);
+	el._strikeTimers ??= {};
+	clearTimeout(el._strikeTimers[cls]); // one timer per class: a flash must not strand an undo mark
+	el._strikeTimers[cls] = setTimeout(() => el.classList.remove(cls), ms);
 }
 
 const pedal = createPedal({
@@ -777,8 +779,8 @@ function updateTally() {
 	const rt = routineStats(activePractice);
 	$('success-count').textContent = sec.s;
 	$('fail-count').textContent = sec.f;
-	$('success-sub').textContent = `This section · routine ${rt.s}`;
-	$('fail-sub').textContent = `This section · routine ${rt.f}`;
+	$('success-sub').textContent = `Section · routine ${rt.s}`;
+	$('fail-sub').textContent = `Section · routine ${rt.f}`;
 	$('tally-foot').replaceChildren(
 		h('span', {}, 'Section ', h('b', {}, formatAccuracy(sec))),
 		h('span', {}, 'Routine ', h('b', {}, formatAccuracy(rt))),

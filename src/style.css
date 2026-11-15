@@ -432,6 +432,7 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 .routine-name {
+	min-width: 0;
 	font-family: var(--font-num) !important;
 	font-size: 28px !important;
 	font-weight: 700;
@@ -563,6 +564,10 @@ input[type='number']::-webkit-outer-spin-button {
 	background: transparent;
 }
 
+.sec.is-selected {
+	background: linear-gradient(90deg, rgba(255, 178, 36, 0.07), transparent 70%);
+}
+
 .sec.is-selected::before {
 	background: var(--amber);
 	box-shadow: 0 0 0 3px var(--stock), 0 0 0 4px var(--amber);
@@ -573,7 +578,8 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 .sec.is-drop-target {
-	box-shadow: inset 0 3px 0 var(--amber);
+	outline: 2px dashed var(--amber);
+	outline-offset: -2px;
 }
 
 .grip {
@@ -599,6 +605,7 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 .sec-name {
+	min-width: 0;
 	grid-area: name;
 	font-weight: 600;
 }
@@ -691,7 +698,6 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 .routine-tools {
-	grid-column: 1 / -1;
 	display: flex;
 	justify-content: flex-end;
 	gap: var(--s1);
@@ -1111,10 +1117,9 @@ input[type='number']::-webkit-outer-spin-button {
 	align-content: space-between;
 	gap: var(--s2);
 	min-height: 150px;
-	padding: var(--s3) var(--s4) var(--s4);
+	padding: var(--s3) var(--s3) var(--s4);
 	border-radius: var(--radius);
-	border: 2px solid var(--rule);
-	border-top: 6px solid currentColor;
+	border: 2px solid currentColor;
 	background: var(--stock-raised);
 	text-align: left;
 	transition: background-color 450ms var(--ease-out), border-color 450ms var(--ease-out);
