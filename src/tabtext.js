@@ -25,17 +25,36 @@ function isStringLine(line) {
 const MARKER = /^\s*\[([^\]]{1,40})\]\s*$|^\s*([A-Za-z][\w '’&-]{0,30}):\s*$/;
 const TEMPO = /(?:tempo|bpm)\s*[:=]?\s*(\d{2,3})\b|\b(\d{2,3})\s*bpm\b/i;
 
-// The `|` columns every line of the system shares (some tabs drift by a
-// column; a bar line has to be in at least half the lines).
-function barColumns(lines) {
-	const width = Math.max(...lines.map((l) => l.length));
-	const cols = [];
-	for (let c = 0; c < width; c++) {
-		const n = lines.filter((l) => l[c] === '|').length;
-		if (n >= Math.ceil(lines.length / 2)) cols.push(c);
+// Hand-typed tabs are often ragged: strings of one system with bars of
+// different widths. Each line is split at its own `|`s and every bar is
+// padded with dashes to the widest copy of it, so the columns line up.
+// Returns the aligned lines, or throws when the strings don't have the
+// same number of bars (nothing sensible to line up).
+export function alignSystem(lines, lineNo = 0) {
+	const split = lines.map((l) => {
+		const first = l.indexOf('|');
+		const label = l.slice(0, first).trimEnd();
+		const parts = l.slice(first + 1).split('|');
+		// After the last `|`: an unclosed bar if it has tab in it, else nothing.
+		if (!/[-\d]/.test(parts[parts.length - 1])) parts.pop();
+		// `||` (double bar line) leaves an empty part: not a bar.
+		return { label, bars: parts.filter((x) => x.length > 0) };
+	});
+	const counts = split.map((x) => x.bars.length);
+	if (new Set(counts).size > 1) {
+		const where = lineNo ? ` (the tab starting on line ${lineNo})` : '';
+		throw new Error(`The strings of one tab system${where} have different numbers of bars (${counts.join(', ')}). Fix the bar lines (|) so every string has the same bars, then try again.`);
 	}
-	// Collapse doubled bar lines (`||`) into one.
-	return cols.filter((c, i) => i === 0 || c !== cols[i - 1] + 1);
+	const labelW = Math.max(...split.map((x) => x.label.length));
+	const widths = split[0].bars.map((_, k) => Math.max(...split.map((x) => x.bars[k].length)));
+	return split.map((x) => `${x.label.padEnd(labelW)}|${x.bars.map((b, k) => b.padEnd(widths[k], '-')).join('|')}|`);
+}
+
+// Bar line columns of an aligned system (every line has them).
+function barColumns(lines) {
+	const cols = [];
+	for (let c = 0; c < lines[0].length; c++) if (lines[0][c] === '|') cols.push(c);
+	return cols;
 }
 
 // Note onsets in one bar: columns where any string starts a fret number
@@ -75,6 +94,8 @@ export function parseTextTab(text) {
 			const group = [];
 			while (i < lines.length && isStringLine(lines[i])) group.push(lines[i++]);
 			if (group.length < 4 || group.length > 8) continue; // not a guitar/bass system
+			const aligned = alignSystem(group, i - group.length + 1);
+			group.splice(0, group.length, ...aligned);
 			const cols = barColumns(group);
 			const first = bars.length + 1;
 			for (let k = 0; k + 1 < cols.length; k++) {

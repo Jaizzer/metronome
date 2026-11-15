@@ -66,3 +66,27 @@ test('tempo out of range is ignored; "120 bpm" is found', () => {
 	assert.equal(parseTextTab(`Song\n120 bpm\n${riff.split('\n').slice(4, 10).join('\n')}`).tempo, 120);
 	assert.equal(parseTextTab(`Tempo: 999\n${riff.split('\n').slice(4, 10).join('\n')}`).tempo, null);
 });
+
+test('ragged strings are lined up bar by bar', () => {
+	const ragged = [
+		'e|---0---|-------3--|',
+		'B|-1---1--|---1---|',
+		'G|0-----|-0----0---|',
+		'D|------|------|',
+		'A|---|---|',
+		'E|-----------|-3-|',
+	].join('\n');
+	const p = parseTextTab(ragged);
+	assert.equal(p.bars.length, 2);
+	const lines = textBarsSlice(p, 1, 2)[0];
+	assert.equal(new Set(lines.map((l) => l.length)).size, 1); // all the same width
+	assert.equal(lines[0], 'e|---0-------|-------3--|');
+	assert.equal(lines[5], 'E|-----------|-3--------|');
+	// onsets per bar after aligning: bar 1 columns 0, 1, 3, 5; bar 2 columns 1 (G + E), 3, 6, 7
+	assert.deepEqual(p.bars.map((b) => b.notes), [4, 4]);
+});
+
+test('strings with different numbers of bars → a clear error, not one garbled bar', () => {
+	const bad = ['Title', 'e|---0---|---0---|', 'B|-1---1-|', 'G|0------|-------|', 'D|-------|-------|', 'A|-------|-------|', 'E|-------|-------|'].join('\n');
+	assert.throws(() => parseTextTab(bad), /starting on line 2\) have different numbers of bars \(2, 1, 2, 2, 2, 2\)/);
+});
