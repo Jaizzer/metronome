@@ -44,7 +44,7 @@ Recording, device copies and same-device playback keep working; uploads and cros
 3. Tailscale + HTTPS.
 4. Outbox sync, resumable uploads, streaming, iCloud keepers, status chip.
 
-## Block mode (✓/✗ drive the tempo), added 2026-11-15
+## Block mode (✓/✗ drive the tempo), added 2026-11-15 — superseded by PRACTICE-ENGINE.md
 Owner's own rule, replacing the rolling-10 idea:
 - A **block** = 30 attempts at one BPM. Pass = **24 ✓** (80%). Both editable per section.
 - The **7th ✗ fails the block at once** → sound cue, counters reset, same BPM. Reaching 24 ✓ with ≤ 6 ✗ passes it at once.
