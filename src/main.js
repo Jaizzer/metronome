@@ -1020,12 +1020,12 @@ window.addEventListener('keyup', (e) => {
 });
 window.addEventListener('blur', () => pedal.cancelPress());
 
-// A mouse/touch click leaves focus on the button, which would swallow the
-// next pedal press (Enter would re-click it). Keyboard clicks (detail 0)
-// keep focus where it is.
+// A mouse/touch click leaves focus on the button (or a <details> summary),
+// which would swallow the next pedal press (Enter would re-click it) or
+// Space. Keyboard clicks (detail 0) keep focus where it is.
 document.addEventListener('click', (e) => {
 	if (e.detail === 0) return;
-	const btn = e.target.closest?.('button, [role=button], [role=switch]');
+	const btn = e.target.closest?.('button, summary, [role=button], [role=switch]');
 	if (btn && document.activeElement === btn) btn.blur();
 });
 
