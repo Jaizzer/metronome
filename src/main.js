@@ -1020,15 +1020,18 @@ window.addEventListener('keyup', (e) => {
 });
 window.addEventListener('blur', () => pedal.cancelPress());
 
-// A mouse/touch click leaves focus on the button (or a <details> summary),
+// A mouse/touch click leaves focus on a button (or a <details> summary),
 // which would swallow the next pedal press (Enter would re-click it) or
-// Space. If the click re-drew the builder (Loop, Song mode, Ramp, Chunk |
-// Run), the clicked button is gone and keepFocus has focused its new copy:
-// blur that too. Keyboard clicks (detail 0) keep focus where it is.
+// Space. After any pointer click, whatever button-like control holds focus
+// is blurred: the clicked one, its re-drawn copy (keepFocus after Loop,
+// Song mode, Ramp, Chunk | Run), or one whose icon was swapped out from
+// under the pointer (Play/Pause). Controls inside an open dialog keep
+// focus. Keyboard clicks (detail 0) keep focus where it is.
+const FOCUS_HOLDERS = 'button, summary, [role=button], [role=switch]';
 document.addEventListener('click', (e) => {
 	if (e.detail === 0) return;
-	const btn = e.target.closest?.('button, summary, [role=button], [role=switch]');
-	if (btn && (document.activeElement === btn || !btn.isConnected)) document.activeElement?.blur();
+	const el = document.activeElement;
+	if (el?.matches?.(FOCUS_HOLDERS) && !el.closest('dialog[open]')) el.blur();
 });
 
 // After editing a field (Enter, or the value committed), hand focus back so
