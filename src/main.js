@@ -16,16 +16,21 @@ import {
 	verifyEmail,
 	resendVerification,
 	fetchPractices,
+	fetchPractice,
 	insertPractice,
-	updatePractice,
+	casUpdatePractice,
 	deletePractice,
 	fetchMasteryCounts,
-	upsertMasteryCounts,
+	fetchTotalsRow,
+	casUpdateTotals,
+	insertTotals,
 	fetchSettings,
 	upsertSettings,
+	setKeepalive,
 } from './db.js';
 import { createPedal } from './pedal.js';
 import { createRecorder, sectionStats, routineStats, formatAccuracy } from './records.js';
+import { createSync, ensureSectionIds, newSectionId, reconcileSections } from './sync.js';
 import { icons } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
@@ -112,44 +117,173 @@ async function withSync(promise) {
 	}
 }
 
-const dirtyPractices = new Set();
+// ✓/✗ counts are saved as deltas merged into the server's numbers, and
+// routine edits with compare-and-swap, so two tabs/devices never
+// overwrite each other's records (see sync.js).
+const sync = createSync({
+	fetchPractice,
+	casUpdatePractice,
+	fetchTotals: fetchTotalsRow,
+	casUpdateTotals,
+	insertTotals,
+});
 
+// One flush/refresh at a time from this tab.
+let syncChain = Promise.resolve();
+function serial(fn) {
+	const run = syncChain.then(fn, fn);
+	syncChain = run.catch(() => {});
+	return run;
+}
+
+const RETRY_MS = 5000;
+
+// A structure edit (name, loop, tempo, length, ramp, order, add/remove).
 function savePractice(p) {
 	if (!p?.id) return;
-	dirtyPractices.add(p.id);
+	sync.markStructure(p.id);
 	debounce('practices', flushPractices, 500);
 }
 
-async function flushPractices() {
-	const ids = [...dirtyPractices];
-	dirtyPractices.clear();
-	const list = ids.map((id) => practices.find((p) => p.id === id)).filter(Boolean);
-	if (!list.length) return;
-	try {
-		await withSync(
-			Promise.all(
-				list.map((p) =>
-					updatePractice(p.id, { name: p.name, loop: p.loop, metronomes: p.metronomes }),
-				),
-			),
-		);
-	} catch {
-		ids.forEach((id) => dirtyPractices.add(id)); // retried with the next save
-	}
+function noteSectionStats(p, section, kind, n) {
+	if (!p?.id || !section?.id || !n) return;
+	sync.addSectionDelta(p.id, section.id, kind, n);
+	debounce('practices', flushPractices, 500);
 }
 
-function saveMasteryCounts() {
-	debounce('mastery', () => withSync(upsertMasteryCounts(totals.s, totals.f)).catch(() => {}), 300);
+function noteTotals(kind, n) {
+	if (!n) return;
+	sync.addTotalsDelta(kind, n);
+	debounce('mastery', flushTotals, 300);
+}
+
+// Apply a fresh server row to the local routine in place (the undo stack
+// and selection hold references to its section objects).
+function applyServerRow(p, row) {
+	ensureSectionIds(row.metronomes ?? (row.metronomes = []));
+	// Keep local structure while it has unsaved edits, or while it's playing.
+	const keep = sync.isStructDirty(p.id) || p === activePractice;
+	if (!keep) {
+		p.name = row.name;
+		p.loop = row.loop;
+	}
+	p.updated_at = row.updated_at;
+	p.metronomes = reconcileSections(p.metronomes, row.metronomes, sync.pendingFor(p.id), keep);
+}
+
+function removeLocalPractice(p) {
+	const idx = practices.indexOf(p);
+	if (idx >= 0) practices.splice(idx, 1);
+	sync.forget(p.id);
+	if (selectedPracticeId === p.id) restoreSelection();
+}
+
+async function flushPractices() {
+	await serial(async () => {
+		const list = practices.filter((p) => sync.hasPending(p.id));
+		if (!list.length) return;
+		try {
+			await withSync(
+				(async () => {
+					for (const p of list) {
+						const row = await sync.flushPractice(p);
+						if (row) applyServerRow(p, row);
+						else if (p !== activePractice) removeLocalPractice(p); // deleted on another device
+					}
+				})(),
+			);
+			refreshViews();
+		} catch {
+			debounce('practices', flushPractices, RETRY_MS); // deltas stay pending
+		}
+	});
+}
+
+function showTotals(server) {
+	const pend = sync.totalsPending();
+	totals.s = Math.max(0, server.s + pend.s);
+	totals.f = Math.max(0, server.f + pend.f);
+}
+
+async function flushTotals() {
+	await serial(async () => {
+		try {
+			showTotals(await withSync(sync.flushTotals()));
+			refreshViews();
+		} catch {
+			debounce('mastery', flushTotals, RETRY_MS);
+		}
+	});
 }
 
 function saveSettings() {
 	debounce('settings', () => withSync(upsertSettings(showStats, metVolume)).catch(() => {}), 300);
 }
 
-document.addEventListener('visibilitychange', () => {
-	if (document.visibilityState === 'hidden') flushSaves();
+// Pull what other tabs/devices saved (on focus / tab shown).
+let lastRefresh = 0;
+async function refreshFromServer() {
+	if (!currentSession || booting || Date.now() - lastRefresh < 2000) return;
+	lastRefresh = Date.now();
+	flushSaves(); // queued saves go first; they merge with the server anyway
+	await serial(async () => {
+		try {
+			const [rows, t] = await Promise.all([fetchPractices(), fetchTotalsRow()]);
+			const byId = new Map(practices.map((p) => [p.id, p]));
+			practices = rows.map((row) => {
+				const p = byId.get(row.id);
+				if (!p) {
+					ensureSectionIds((row.metronomes ??= []));
+					return row;
+				}
+				applyServerRow(p, row);
+				return p;
+			});
+			showTotals({ s: t?.success ?? 0, f: t?.fail ?? 0 });
+			if (!practices.some((p) => p.id === selectedPracticeId)) restoreSelection();
+			refreshViews();
+		} catch (e) {
+			console.error('Refresh failed:', e);
+		}
+	});
+}
+
+// Re-render after background changes without yanking an input the user
+// is typing in: wait until they leave it.
+let renderDeferred = false;
+function refreshViews() {
+	if (view === 'player') return updateTally();
+	if (view !== 'builder') return;
+	if (document.activeElement?.closest?.('#app input')) {
+		renderDeferred = true;
+		return;
+	}
+	renderBuilder({ keepFocus: true });
+}
+document.addEventListener('focusout', () => {
+	if (!renderDeferred) return;
+	setTimeout(() => {
+		if (renderDeferred && !document.activeElement?.closest?.('#app input')) {
+			renderDeferred = false;
+			if (view === 'builder') renderBuilder({ keepFocus: true });
+		}
+	}, 0);
 });
-window.addEventListener('pagehide', flushSaves);
+
+document.addEventListener('visibilitychange', () => {
+	if (document.visibilityState === 'hidden') {
+		setKeepalive(true); // final saves must survive the page going away
+		flushSaves();
+	} else {
+		setKeepalive(false);
+		refreshFromServer();
+	}
+});
+window.addEventListener('pagehide', () => {
+	setKeepalive(true);
+	flushSaves();
+});
+window.addEventListener('focus', refreshFromServer);
 
 // ---------------- Views + toast ----------------
 
@@ -329,7 +463,11 @@ async function bootApp(session) {
 			fetchMasteryCounts(),
 			fetchSettings(),
 		]);
-		practices = fetchedPractices.map((p) => ({ ...p, metronomes: p.metronomes ?? [] }));
+		practices = fetchedPractices.map((p) => {
+			const row = { ...p, metronomes: p.metronomes ?? [] };
+			ensureSectionIds(row.metronomes);
+			return row;
+		});
 		totals.s = masteryCounts.success;
 		totals.f = masteryCounts.fail;
 		showStats = settings.show_stats;
@@ -412,11 +550,12 @@ function currentTarget() {
 
 // ---------------- Recording ✓ / ✗ ----------------
 
-function record(kind) {
-	const target = currentTarget();
+// target: captured when the pedal was pressed (so a section change during
+// the double-tap window can't steal the record); defaults to "now".
+function record(kind, target = currentTarget()) {
 	recorder.record(kind, target);
-	if (target?.practice) savePractice(target.practice);
-	saveMasteryCounts();
+	noteSectionStats(target?.practice, target?.section, kind, 1);
+	noteTotals(kind, 1);
 	refreshStats();
 
 	const good = kind === 's';
@@ -432,8 +571,8 @@ function undoLast() {
 		toast('Nothing to undo');
 		return;
 	}
-	if (entry.practice && !entry.sectionGone) savePractice(entry.practice);
-	saveMasteryCounts();
+	if (!entry.sectionGone) noteSectionStats(entry.practice, entry.section, entry.kind, -1);
+	noteTotals(entry.kind, -1);
 	refreshStats();
 
 	const good = entry.kind === 's';
@@ -572,10 +711,11 @@ $('resetStats').onclick = () => {
 		text: `Sets your all-time ✓ ${totals.s} / ✗ ${totals.f} back to zero. Per-section stats are kept.`,
 		confirm: 'Reset',
 		onConfirm: () => {
+			noteTotals('s', -totals.s);
+			noteTotals('f', -totals.f);
 			totals.s = 0;
 			totals.f = 0;
 			recorder.clear();
-			saveMasteryCounts();
 			refreshStats();
 		},
 	});
@@ -1252,9 +1392,13 @@ function renderRoutine(p, pIdx) {
 							text: `Clears ✓ ${rt.s} / ✗ ${rt.f} from every section of “${p.name}”. Your all-time total is kept.`,
 							confirm: 'Reset',
 							onConfirm: () => {
-								p.metronomes.forEach((m) => (m.stats = { s: 0, f: 0 }));
+								for (const m of p.metronomes) {
+									const st = sectionStats(m);
+									noteSectionStats(p, m, 's', -st.s);
+									noteSectionStats(p, m, 'f', -st.f);
+									m.stats = { s: 0, f: 0 };
+								}
 								recorder.clear();
-								savePractice(p);
 								renderBuilder();
 							},
 						}),
@@ -1288,6 +1432,7 @@ function renderRoutine(p, pIdx) {
 					onclick: () => {
 						const last = p.metronomes[p.metronomes.length - 1];
 						const section = {
+							id: newSectionId(),
 							name: `Exercise ${p.metronomes.length + 1}`,
 							startBPM: last?.startBPM ?? 100,
 							duration: last?.duration ?? 60,
@@ -1365,10 +1510,7 @@ function openDeleteDialog(p) {
 		text: `“${p.name}” and its per-section stats will be deleted. Your all-time total is kept.`,
 		confirm: 'Delete',
 		onConfirm: async () => {
-			const idx = practices.indexOf(p);
-			if (idx >= 0) practices.splice(idx, 1);
-			dirtyPractices.delete(p.id);
-			if (selectedPracticeId === p.id) restoreSelection();
+			removeLocalPractice(p);
 			renderBuilder();
 			if (p.id) await withSync(deletePractice(p.id)).catch(() => {});
 		},
@@ -1381,12 +1523,13 @@ async function addRoutine() {
 	const draft = {
 		name: 'New routine',
 		loop: false,
-		metronomes: [{ name: 'Exercise 1', startBPM: 100, duration: 60, ramp: false }],
+		metronomes: [{ id: newSectionId(), name: 'Exercise 1', startBPM: 100, duration: 60, ramp: false }],
 		position: practices.length,
 	};
 	try {
 		const created = await withSync(insertPractice(draft));
 		practices.push({ ...created, metronomes: created.metronomes ?? [] });
+		ensureSectionIds(practices[practices.length - 1].metronomes);
 		const p = practices[practices.length - 1];
 		selectSection(p, p.metronomes[0]);
 		renderBuilder();

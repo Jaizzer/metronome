@@ -39,6 +39,14 @@ const TRUSTED_DEV_ORIGIN = 'http://localhost:5173';
 const useProxy = location.origin !== TRUSTED_DEV_ORIGIN;
 const AUTH_URL = useProxy ? `${location.origin}/api/auth` : DIRECT_AUTH_URL;
 
+// While the page is being hidden/closed, Data API requests go out with
+// `keepalive` so the final save isn't cancelled by the page unloading.
+let keepalive = false;
+export function setKeepalive(on) {
+	keepalive = on;
+}
+const dataFetch = (input, init = {}) => fetch(input, keepalive ? { ...init, keepalive: true } : init);
+
 export const client = createClient({
 	auth: {
 		adapter: SupabaseAuthAdapter(),
@@ -46,6 +54,7 @@ export const client = createClient({
 	},
 	dataApi: {
 		url: DATA_API_URL,
+		options: { global: { fetch: dataFetch } },
 	},
 });
 
@@ -102,10 +111,12 @@ export function onAuthChange(callback) {
 
 // ---------- Practices ----------
 
+const PRACTICE_COLS = 'id, name, loop, metronomes, position, updated_at';
+
 export async function fetchPractices() {
 	const { data, error } = await client
 		.from('practices')
-		.select('id, name, loop, metronomes, position')
+		.select(PRACTICE_COLS)
 		.order('position', { ascending: true });
 	if (error) throw error;
 	return data ?? [];
@@ -117,29 +128,29 @@ export async function insertPractice(practice) {
 	return data;
 }
 
-export async function updatePractice(id, patch) {
+export async function fetchPractice(id) {
+	const { data, error } = await client.from('practices').select(PRACTICE_COLS).eq('id', id).maybeSingle();
+	if (error) throw error;
+	return data;
+}
+
+// Compare-and-swap: only writes if the row is unchanged since we read it
+// (updated_at is bumped by a trigger on every write). Returns the new row,
+// or null when someone else wrote first. See sync.js.
+export async function casUpdatePractice(id, updatedAt, patch) {
 	const { data, error } = await client
 		.from('practices')
 		.update(patch)
 		.eq('id', id)
-		.select()
-		.single();
+		.eq('updated_at', updatedAt)
+		.select(PRACTICE_COLS);
 	if (error) throw error;
-	return data;
+	return data?.[0] ?? null;
 }
 
 export async function deletePractice(id) {
 	const { error } = await client.from('practices').delete().eq('id', id);
 	if (error) throw error;
-}
-
-// Persist new ordering after a drag-and-drop reorder.
-// Takes an array of { id, position } pairs.
-export async function reorderPractices(order) {
-	for (const { id, position } of order) {
-		const { error } = await client.from('practices').update({ position }).eq('id', id);
-		if (error) throw error;
-	}
 }
 
 // ---------- Mastery counts ----------
@@ -153,11 +164,38 @@ export async function fetchMasteryCounts() {
 	return data ?? { success: 0, fail: 0 };
 }
 
-export async function upsertMasteryCounts(success, fail) {
-	const { error } = await client
+export async function fetchTotalsRow() {
+	const { data, error } = await client
 		.from('mastery_counts')
-		.upsert({ success, fail }, { onConflict: 'owner_id' });
+		.select('success, fail, updated_at')
+		.maybeSingle();
 	if (error) throw error;
+	return data;
+}
+
+// RLS limits this to the caller's own single row.
+export async function casUpdateTotals(updatedAt, success, fail) {
+	const { data, error } = await client
+		.from('mastery_counts')
+		.update({ success, fail })
+		.eq('updated_at', updatedAt)
+		.select('success, fail, updated_at');
+	if (error) throw error;
+	return data?.[0] ?? null;
+}
+
+// First-ever write. Returns null if another device created the row first
+// (unique owner_id), so the caller re-reads and merges instead.
+export async function insertTotals(success, fail) {
+	const { data, error } = await client
+		.from('mastery_counts')
+		.insert({ success, fail })
+		.select('success, fail, updated_at');
+	if (error) {
+		if (error.code === '23505') return null;
+		throw error;
+	}
+	return data?.[0] ?? null;
 }
 
 // ---------- User settings ----------
