@@ -1378,9 +1378,19 @@ function renderSection(p, pIdx, m, mIdx) {
 			'aria-label': `Remove section ${m.name}`,
 			onclick: (e) => {
 				e.stopPropagation();
-				p.metronomes.splice(mIdx, 1);
-				savePractice(p);
-				renderBuilder();
+				const remove = () => {
+					const i = p.metronomes.indexOf(m);
+					if (i >= 0) p.metronomes.splice(i, 1);
+					savePractice(p);
+					renderBuilder();
+				};
+				if (st.s + st.f === 0) return remove();
+				confirmDialog({
+					title: 'Remove section?',
+					text: `“${m.name}” has ✓ ${st.s} / ✗ ${st.f} recorded. Removing it deletes those stats. Your all-time total is kept.`,
+					confirm: 'Remove',
+					onConfirm: remove,
+				});
 			},
 		}),
 		fields,
