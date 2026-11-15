@@ -33,7 +33,7 @@ Per-section stats live inside each section object as `stats: { s, f }`, with an 
 { "id": "6f1c…", "name": "Exercise 1", "startBPM": 100, "endBPM": 120, "ramp": true, "duration": 60, "stats": { "s": 12, "f": 3 } }
 ```
 
-**Several tabs or devices at once** (`src/sync.js`): records and undos are saved as deltas. Each save re-reads the row, adds the deltas to the server's counts, and writes with compare-and-swap on `updated_at`, retrying if another device wrote first, so no record is lost. Routine edits (names, tempos, order) are last-writer-wins. Tabs re-read when focused or shown.
+**Several tabs or devices at once** (`src/sync.js`): records and undos are saved as deltas. Each save re-reads the row, adds the deltas to the server's counts, and writes with compare-and-swap on `updated_at`, retrying if another device wrote first, so no record is lost. Routine edits (names, tempos, order) are last-writer-wins. Tabs re-read when focused or shown. Unsaved counts are mirrored to localStorage (per tab, per user), so closing the tab, going offline, or an expired session doesn't lose them: the next load or sign-in on that device saves them, once. A write whose response never arrives is checked against the server before anything is re-sent. Failed saves retry with backoff (5 s up to 60 s) and toast once.
 
 ## The auth proxy (and how to remove it)
 
