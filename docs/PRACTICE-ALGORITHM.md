@@ -13,15 +13,17 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Player status line
 - [x] Harness check (screenshots 390/1280, scripted flow), docs (README, DESIGN)
 - [x] Deploy check (Vercel production + 200)
+- [x] Review round 1: probe-tempo cold checks (owned tempo keeps rising), warm-ups don't count, runs never due, settings from the first section that has them, `joined` one-way in sync, plateau counts ✗-only days, Chunk | Run inside the disclosure, due names in the summary, new-day start on load/day change, plainer 22–24px player line
+- [ ] Round 1 deploy check
 
 **Built (phase 1)**
 - Song mode per routine (switch in the routine head), stored as `song: { on, target }` on every section; sections carry `kind` ('chunk' | 'run'), `joined` and `log` (attempts `{ id, t, k, bpm }`, newest 400 kept). No schema change.
 - Every ✓/✗ in a song routine is an attempt at the tempo it was played at (live tempo, captured at pedal press). Undo removes the attempt.
 - §3 ladder per chunk: 2 ✓ in a row → +3/4/5% by band (capped: ceiling = 110% of target; joined chunks: song tempo +10%); 2 ✗ → "try half the chunk" prompt; 4 ✗ → −4%. Streaks count within one day only (today's first attempt is the cold check). Short rising/falling tone when the click is running.
-- §4 owned tempo, cold attempts, review gaps 1/3/7/14/30 days, "Due today"; a new day starts each owned chunk at its owned tempo (capped).
+- §4 probe tempo, cold checks (warm-ups excluded), owned tempo, review gaps 1/3/7/14/30 days, "Due today". The new-day start (probe tempo) runs when routines load, on focus/refresh, when the day changes and on Start: once per section per day, and not after the section was played that day, so a manual change sticks.
 - §5 song tempo, bottleneck, joining; plateau flag with the advice line (§3).
-- §7 displays: song summary line, one status line per section (band, next review, attempts and plateau advice behind a disclosure), player line ("Work · ✓ 1 of 2 to go up · Band 82% · Owned 72", "Cold attempt · …", "Run · tap ✗ and keep playing").
-- Run sections: record only, no ladder, never join, ✗ never stops playback. Song mode ignores Ramp (sections play at their tempo).
+- §7 displays: song summary line, one status line per section (band, next review, attempts and plateau advice behind a disclosure), player line ("First try today · this is your daily check", "Warm-up · daily check from 72 BPM", "Work · 1 more ✓ to go up", "Work · at the cap (77 BPM)", "Run · tap ✗ and keep playing"). Chunk | Run is set inside each section's disclosure.
+- Run sections: record only, no ladder, never join, never due, ✗ never stops playback. Song mode ignores Ramp (sections play at their tempo).
 
 **Not built yet**
 - Session planner automation (§6: cold checks → work → trouble cycle → run → finish, interleaving every 3–5 attempts, ~10 min caps).
@@ -67,13 +69,13 @@ Supersedes the scoring, tempo and planner rules in `PRACTICE-ENGINE.md` (its tak
 - **Success band** (rolling 30 attempts, all sessions): **70–90% = good.**
   - Above 90% → steps become 5% and overspeed attempts are allowed.
   - Below 70% → steps become 3% and shrinking kicks in sooner.
-- **Plateau:** session top tempo unchanged for **3 sessions** → stop climbing. Prompt: film your hands, check tension; legato: fretting hand alone; then bursts and rhythm variations (dotted, reversed). Variations never count toward progress.
+- **Plateau:** session top tempo unchanged for **3 sessions** (a session with no ✓ has no new top) → stop climbing. Prompt: film your hands, check tension; legato: fretting hand alone; then bursts and rhythm variations (dotted, reversed). Variations never count toward progress.
 
 ## 4. Owned tempo (retention)
-- **Cold attempt** = the first attempt of the day on a chunk, at its owned tempo.
-- **Owned tempo** = the highest tempo whose **cold attempt passed on 2 separate days**.
-- Each session **starts at the owned tempo** (warm-up below it allowed); the ladder climbs from there.
-- A cold ✗ moves the chunk into today's work queue.
+- **Probe tempo** = the previous practice day's top ✓ tempo on that chunk, capped by the chunk's cap (fallback: the owned tempo, then the chunk's current tempo). Each session **starts at the probe tempo**.
+- **Cold attempt (the daily check)** = the first attempt of the day at or above stepDown(previous practice day's top ✓) (−4%). Slower attempts before it are warm-ups and don't count. On the first day (or after a day with no ✓) the first attempt counts.
+- **Cold ✓** → keep climbing from the probe (the ladder). **Cold ✗** → the working tempo drops to max(owned tempo, stepDown(probe)) (no owned tempo: stepDown(probe)), and the chunk goes into today's work queue.
+- **Owned tempo** = the highest tempo whose **cold check passed on 2 separate days**. Because the check is played at yesterday's top, owned tempo rises with a one-day lag (10-day all-clean simulation from 70 toward 120: owned 70, 76, 77, 84, 85, 92, 94, 101, 103).
 
 ## 5. Song tempo and assembly
 - **Song tempo = lowest owned tempo among joined chunks.** A new chunk joins when its owned tempo ≥ song tempo.
