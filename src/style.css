@@ -400,6 +400,12 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 /* All-time ✓/✗: one quiet line, no rules. */
+.head-tools {
+	display: flex;
+	align-items: center;
+	gap: var(--s2);
+}
+
 .alltime,
 .alltime-row {
 	margin: 0;
@@ -644,9 +650,9 @@ input[type='number']::-webkit-outer-spin-button {
 /* The row: selected dot · name (+ song status) · tempo · length · chevron. */
 .sec-open {
 	display: grid;
-	grid-template-columns: 8px minmax(0, 1fr) auto 3.4em 12px;
+	grid-template-columns: 8px minmax(0, 1fr) auto 3.2em 12px;
 	align-items: center;
-	gap: var(--s3);
+	gap: var(--s2);
 	width: 100%;
 	min-height: 60px;
 	padding: var(--s2) var(--s3) var(--s2) var(--s2);
@@ -681,8 +687,23 @@ input[type='number']::-webkit-outer-spin-button {
 
 .sec-label {
 	font-weight: 600;
+	line-height: 1.25;
 	overflow: hidden;
-	text-overflow: ellipsis;
+	overflow-wrap: break-word;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+}
+
+/* Open: the name field below takes over, so the row shows the name once
+   (still read out with the row for screen readers). */
+.sec.is-open .sec-label {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
 	white-space: nowrap;
 }
 
@@ -707,6 +728,14 @@ input[type='number']::-webkit-outer-spin-button {
 	font-size: 24px;
 	font-weight: 600;
 	line-height: 1;
+}
+
+.sec-tempo i {
+	font-family: var(--font-ui);
+	font-style: normal;
+	font-size: 14px;
+	color: var(--paper-2);
+	margin: 0 1px;
 }
 
 .sec-tempo small,
@@ -1731,6 +1760,11 @@ dialog p {
 	font-weight: 600;
 }
 
+.seg-btn {
+	min-width: 44px;
+	justify-content: center;
+}
+
 .seg-btn:hover {
 	color: var(--paper);
 }
@@ -1877,16 +1911,21 @@ dialog p {
 /* ---------- Phones ---------- */
 
 @media (max-width: 560px) {
-	.builder-head h1 {
-		font-size: 34px;
-	}
-
 	.routine-name {
 		font-size: 26px !important;
 	}
 
+	.builder-head h1 {
+		font-size: 30px;
+	}
+
 	.seg-btn {
 		padding: 0 var(--s2);
+	}
+
+	/* Rows: the numeral is the tempo; the panel still labels it BPM. */
+	.sec-tempo small {
+		display: none;
 	}
 }
 
