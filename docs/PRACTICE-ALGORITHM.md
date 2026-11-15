@@ -31,7 +31,7 @@ Running checklist so work can resume after an interruption (update it with every
 **Not built yet**
 - Session planner automation (§6: cold checks → work → trouble cycle → run → finish, interleaving every 3–5 attempts, ~10 min caps).
 - Rest timer between attempts (§2).
-- Entry-point rotation for links (§5) and seams as automatic chunks (§1.3).
+- Entry-point rotation for links (§5). Seams as automatic chunks (§1.3) exist only for routines made by tab import (docs/TAB-IMPORT.md).
 - Mixed-tempo checks every 3rd visit (§3).
 - Burst chunk type (§1.5) and rhythm variations.
 - Automatic chunk halving (the app only prompts "try half the chunk"; splitting is manual).
