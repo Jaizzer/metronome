@@ -1670,6 +1670,75 @@ dialog p {
 	border-color: var(--amber);
 }
 
+/* ---------- Song mode ---------- */
+
+.song-bar {
+	grid-column: 1 / -1;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--s2) var(--s4);
+}
+
+.song-sum {
+	margin: 0;
+	flex: 1 1 220px;
+	font-size: 14px;
+	color: var(--paper-2);
+	font-variant-numeric: tabular-nums;
+}
+
+.sec.is-song {
+	grid-template-areas:
+		'grip name stats remove'
+		'. fields fields fields'
+		'. song song song';
+}
+
+.sec-song {
+	grid-area: song;
+	min-width: 0;
+	font-size: 14px;
+	color: var(--paper-2);
+	font-variant-numeric: tabular-nums;
+}
+
+.sec-song summary {
+	display: block;
+	min-height: 44px;
+	padding: 12px 0;
+	line-height: 20px;
+	cursor: pointer;
+	font-weight: 600;
+	color: var(--paper);
+	list-style: none;
+}
+
+.sec-song summary::-webkit-details-marker {
+	display: none;
+}
+
+/* A chevron drawn in paper-3: turns when the details are open. */
+.sec-song summary::after {
+	content: '';
+	display: inline-block;
+	vertical-align: 3px;
+	width: 7px;
+	height: 7px;
+	margin-left: var(--s2);
+	border-right: 2px solid var(--paper-3);
+	border-bottom: 2px solid var(--paper-3);
+	transform: rotate(45deg) translate(-2px, -2px);
+}
+
+.sec-song[open] summary::after {
+	transform: rotate(225deg) translate(-2px, -2px);
+}
+
+.sec-song p {
+	margin: 0 0 var(--s1);
+}
+
 /* ---------- Phones ---------- */
 
 @media (max-width: 560px) {
@@ -1681,6 +1750,14 @@ dialog p {
 			'. stats stats'
 			'. fields fields';
 		row-gap: var(--s2);
+	}
+
+	.sec.is-song {
+		grid-template-areas:
+			'grip name remove'
+			'. stats stats'
+			'. fields fields'
+			'. song song';
 	}
 
 	.sec .tally-inline {

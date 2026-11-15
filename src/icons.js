@@ -30,5 +30,7 @@ export const icons = {
 	layers: svg('<path d="M12 3.5l8.5 4.5L12 12.5 3.5 8z"/><path d="M3.5 12.5L12 17l8.5-4.5"/>'),
 	metronome: svg('<path d="M6.5 20.5h11L14 3.5h-4z"/><path d="M12 15.5l5.5-9"/><path d="M8 15.5h8"/>'),
 	cloud: svg('<path d="M7 18.5a4.5 4.5 0 01-.6-8.96A6 6 0 0118 9.5a4.5 4.5 0 01-.5 9z"/><path d="M9.5 14l2 2 3.5-3.5"/>'),
+	song: svg('<path d="M9 18V5.5l11-2V16"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>'),
+	run: svg('<path d="M4 12h15"/><path d="M13 6l6 6-6 6"/>'),
 	target: svg('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12h.01" stroke-width="3"/>'),
 };

@@ -1584,10 +1584,48 @@ function clampBPM(v, fallback) {
 	return Number.isFinite(n) ? Math.max(20, Math.min(300, n)) : fallback;
 }
 
-function renderSection(p, pIdx, m, mIdx) {
+// Song mode details the owner opened stay open across re-renders.
+const openSongDetails = new Set();
+
+const STATE_LABEL = { new: '○ New', joined: '● Joined', bottleneck: '▼ Bottleneck', run: '→ Run' };
+
+function shortDate(key) {
+	const [y, mo, d] = key.split('-').map(Number);
+	return new Date(y, mo - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// One short line per section; band, next review and plateau advice are
+// behind the disclosure (plateau and due-today also show on the line).
+function songStatusEl(p, m, song) {
+	const cs = chunkStatus(m, song);
+	const bandText = cs.band === null ? 'Band –' : `Band ${Math.round(cs.band * 100)}%`;
+	const line = [STATE_LABEL[cs.state]];
+	if (cs.state !== 'run') line.push(cs.owned === null ? 'Owned –' : `Owned ${cs.owned}`);
+	else line.push(`${cs.attempts} ${cs.attempts === 1 ? 'attempt' : 'attempts'}`);
+	if (cs.due) line.push('Due today');
+	if (cs.plateau && cs.state !== 'run') line.push('Plateau');
+	const review = cs.state === 'run' || cs.due ? null : cs.review ? `Next review ${shortDate(cs.review)}` : 'Review starts once owned';
+	return h(
+		'details',
+		{
+			class: 'sec-song',
+			open: openSongDetails.has(m.id),
+			ontoggle: (e) => (e.target.open ? openSongDetails.add(m.id) : openSongDetails.delete(m.id)),
+		},
+		h('summary', {}, line.join(' · ')),
+		h(
+			'p',
+			{},
+			[bandText, review, `${cs.attempts} ${cs.attempts === 1 ? 'attempt' : 'attempts'}`].filter(Boolean).join(' · '),
+		),
+		cs.plateau && cs.state !== 'run' && h('p', {}, 'Plateau · film your hands, check tension'),
+	);
+}
+
+function renderSection(p, pIdx, m, mIdx, song = null) {
 	const st = sectionStats(m);
 	const li = h('li', {
-		class: `sec${m === currentTarget()?.section ? ' is-selected' : ''}`,
+		class: `sec${song ? ' is-song' : ''}${m === currentTarget()?.section ? ' is-selected' : ''}`,
 		'data-pidx': pIdx,
 		'data-midx': mIdx,
 		onclick: () => selectSection(p, m),
@@ -1668,6 +1706,24 @@ function renderSection(p, pIdx, m, mIdx) {
 			iconEl('clock'),
 			formatDuration(m.duration),
 		),
+		song &&
+			h(
+				'button',
+				{
+					class: 'ramp-btn',
+					type: 'button',
+					'aria-pressed': String(isRun(m)),
+					title: 'Run: a play-through. Tap ✗ and keep playing; no tempo changes.',
+					onclick: () => {
+						m.kind = isRun(m) ? 'chunk' : 'run';
+						savePractice(p);
+						renderBuilder();
+					},
+				},
+				iconEl('run'),
+				'Run',
+			),
+		!song &&
 		h(
 			'button',
 			{
@@ -1684,6 +1740,7 @@ function renderSection(p, pIdx, m, mIdx) {
 			iconEl('ramp'),
 			'Ramp',
 		),
+		!song &&
 		m.ramp &&
 			h(
 				'label',
@@ -1743,8 +1800,50 @@ function renderSection(p, pIdx, m, mIdx) {
 			},
 		}),
 		fields,
+		...(song ? [songStatusEl(p, m, song)] : []), // native append: no null children
 	);
 	return li;
+}
+
+// Target BPM and one summary line for a song-mode routine.
+function songBar(p, song) {
+	const target = songTarget(p);
+	const due = p.metronomes.filter((m) => chunkStatus(m, song).due).length;
+	const parts =
+		song.tempo === null
+			? ['Song tempo: not set yet · own a chunk on 2 days']
+			: [
+					`Song tempo ${song.tempo}`,
+					song.pct !== null ? `${song.pct}% of ${target}` : null,
+					song.bottleneck ? `Bottleneck: ${song.bottleneck.name}` : null,
+				];
+	if (due) parts.push(`Due today:\u00a0${due}`);
+	return h(
+		'div',
+		{ class: 'song-bar' },
+		h(
+			'label',
+			{ class: 'mini' },
+			'Target',
+			h('input', {
+				type: 'number',
+				min: '20',
+				max: '300',
+				step: '1',
+				inputmode: 'numeric',
+				placeholder: '–',
+				value: target === null ? '' : String(target),
+				'aria-label': `${p.name} target tempo (BPM)`,
+				onchange: (e) => {
+					const v = e.target.value.trim();
+					setSong(p, { target: v === '' ? null : clampBPM(v, target ?? 120) });
+					renderBuilder({ keepFocus: true });
+				},
+			}),
+			'BPM',
+		),
+		h('p', { class: 'song-sum' }, parts.filter(Boolean).join(' · ')),
+	);
 }
 
 function renderRoutine(p, pIdx) {
@@ -1766,6 +1865,26 @@ function renderRoutine(p, pIdx) {
 		h('span', { class: 'switch-track', 'aria-hidden': 'true' }),
 		iconEl('loop'),
 		'Loop',
+	);
+	const songOn = isSong(p);
+	const song = songOn ? songNow(p) : null;
+	const songSwitch = h(
+		'button',
+		{
+			class: 'switch',
+			type: 'button',
+			role: 'switch',
+			'aria-checked': String(songOn),
+			disabled: !p.metronomes.length,
+			title: 'Song mode: tempo ladder, owned tempo and reviews per section',
+			onclick: () => {
+				setSong(p, { on: !songOn });
+				renderBuilder();
+			},
+		},
+		h('span', { class: 'switch-track', 'aria-hidden': 'true' }),
+		iconEl('song'),
+		'Song mode',
 	);
 
 	return h(
@@ -1828,10 +1947,12 @@ function renderRoutine(p, pIdx) {
 				h('span', { class: 'meta-item' }, iconEl('layers'), `${p.metronomes.length} ${p.metronomes.length === 1 ? 'section' : 'sections'}`),
 				h('span', { class: 'meta-item' }, iconEl('clock'), formatDuration(totalTime)),
 				loopSwitch,
+				songSwitch,
 			),
+			songOn && songBar(p, song),
 			shareBar(rt),
 		),
-		h('ol', { class: 'sections' }, p.metronomes.map((m, mIdx) => renderSection(p, pIdx, m, mIdx))),
+		h('ol', { class: 'sections' }, p.metronomes.map((m, mIdx) => renderSection(p, pIdx, m, mIdx, song))),
 		h(
 			'div',
 			{ class: 'routine-actions' },
@@ -1849,6 +1970,7 @@ function renderRoutine(p, pIdx) {
 							duration: last?.duration ?? 60,
 							ramp: false,
 						};
+						if (songOf(p)) section.song = { ...songOf(p) };
 						p.metronomes.push(section);
 						selectSection(p, section);
 						savePractice(p);

@@ -9,9 +9,9 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Recording: attempt per ✓/✗ in song-mode routines, undo removes it
 - [x] Ladder after each chunk attempt (up/down/shrink toasts + tone), join the song
 - [x] startRoutine: chunks start at their owned tempo (capped) on a new day
-- [ ] (in progress) Builder UI: Song mode switch, target BPM, song summary, Chunk/Run toggle, one-line status per section (details behind a disclosure), Ramp hidden
+- [x] Builder UI: Song mode switch, target BPM, song summary, Chunk/Run toggle, one-line status per section (details behind a disclosure), Ramp hidden
 - [x] Player status line
-- [ ] Harness check (screenshots 390/1280, flow), docs (README, DESIGN), deploy check
+- [ ] (in progress) Harness check (screenshots 390/1280, flow), docs (README, DESIGN), deploy check
 
 
 Supersedes the scoring, tempo and planner rules in `PRACTICE-ENGINE.md` (its takes, auto-judge and display notes still apply). Sources and evidence strength: `PRACTICE-RESEARCH.md`. Numbers marked *(default)* are tunable starting settings, not research facts.
