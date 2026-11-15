@@ -21,17 +21,19 @@ The pedal must send the **Enter** key.
 | Double-tap | ✗ bad run (recorded at once; further taps in the same window are ignored) |
 | Hold ≥ 0.8 s | Undo the last record (a tap followed by a hold just cancels that tap) |
 
-Key auto-repeat is ignored, and the pedal does nothing while you're typing in a field or a dialog is open. Timings are `DOUBLE_TAP_MS` and `HOLD_MS` in `src/pedal.js`.
+A record goes to the section that was current when the pedal went down, even if the section changes during the window. Undo (button or Cmd/Ctrl+Z) during the window cancels the pending ✓. Key auto-repeat is ignored. The pedal does nothing while a dialog is open or while focus is on a button, link, or field (there Enter keeps its normal meaning); mouse clicks and finished edits hand focus back so the pedal keeps working. Timings are `DOUBLE_TAP_MS` and `HOLD_MS` in `src/pedal.js`.
 
 ## Data
 
 Tables (see `sql/schema.sql`, reference only): `practices` (a routine; its sections are the `metronomes` jsonb array), `mastery_counts` (all-time ✓/✗), `user_settings` (volume, show stats). Row-level security scopes every row to `auth.user_id()`.
 
-Per-section stats live inside each section object as `stats: { s, f }`, so no schema change was needed:
+Per-section stats live inside each section object as `stats: { s, f }`, with an `id` to match sections across devices, so no schema change was needed:
 
 ```json
-{ "name": "Exercise 1", "startBPM": 100, "endBPM": 120, "ramp": true, "duration": 60, "stats": { "s": 12, "f": 3 } }
+{ "id": "6f1c…", "name": "Exercise 1", "startBPM": 100, "endBPM": 120, "ramp": true, "duration": 60, "stats": { "s": 12, "f": 3 } }
 ```
+
+**Several tabs or devices at once** (`src/sync.js`): records and undos are saved as deltas. Each save re-reads the row, adds the deltas to the server's counts, and writes with compare-and-swap on `updated_at`, retrying if another device wrote first, so no record is lost. Routine edits (names, tempos, order) are last-writer-wins. Tabs re-read when focused or shown.
 
 ## The auth proxy (and how to remove it)
 
@@ -80,6 +82,7 @@ The old GitHub Pages site serves the unbuilt source and doesn't work; use the Ve
 | `src/main.js` | UI, audio engine, player, recording, saving |
 | `src/pedal.js` | Pedal gesture timing (tap / double-tap / hold) |
 | `src/records.js` | ✓/✗ tallies and the undo stack |
+| `src/sync.js` | Conflict-safe saving (deltas + compare-and-swap) |
 | `src/db.js` | All Neon calls (auth + Data API) |
 | `src/style.css`, `src/icons.js` | Styles and the SVG icon set; tokens in `DESIGN.md` |
 | `api/auth-proxy.js` | Same-origin Neon Auth proxy (see above) |
