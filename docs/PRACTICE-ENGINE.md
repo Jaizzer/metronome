@@ -57,3 +57,12 @@ Design agreed in conversation 2026-11-15 (owner's 80% / 30-attempt rule, improve
 - **Seams, links and the full run always play at the song tempo.** Raising the song tempo (when the slowest part confirms higher) moves all of them up together.
 - **Full run ✓/✗:** play through without stopping; tap ✗ the moment of a slip (time-stamped; with "bars per part" the app attributes it to a part and counts it there); tap ✓ once at the end if it held together. A milestone counts when the full run holds together on 2 different days.
 - Player shows: `Song tempo 72 (60% of 120) · Slowest: Part 3 · Next milestone 84`.
+
+## Auto-judge: outsourcing ✓/✗ (added 2026-11-15)
+The engine doesn't change; only the source of each ✓/✗ does: **you**, **auto**, or **auto + your veto**.
+- **What it can judge (mechanics):** right notes, missed/extra notes, timing vs the click. **Not:** relaxed hands, tone/buzz (roughly at best), feel. Drills are mechanical, so parts, seams and bursts can be auto-judged; the full run's final ✓ stays yours.
+- **Needs:** direct-in recording (clean signal, no click bleed); the expected notes per part, imported from the tab (Guitar Pro via alphaTab, open source, parses .gp3–.gp7 in the browser); fixed attempt length (part bars + 1 bar rest, looped) so attempts are cut automatically.
+- **Per attempt:** pitch → notes (Basic Pitch), onsets (librosa / in-browser onset detection); compare with the tab. ✓ = every note right (≤ 1 ghost/extra note allowed) and every onset within ± min(30 ms, 25% of the note grid). Verdict ~0.5–1 s after the attempt, with a sound cue.
+- **Trust before use:** **shadow mode** first: you keep tapping, the app judges silently; it shows agreement %. Switch a section to auto only when agreement ≥ 90% over 100+ attempts. Fast legato (quiet hammer-ons/pull-offs) is the hardest case for detection; expect it to need tolerance tuning.
+- **Veto:** in auto mode, a pedal double-tap within 2 s flips the last verdict; vetoes are logged to retune tolerances.
+- **Runs:** in the browser for live verdicts (TF.js Basic Pitch on iPad/Mac); the Mac worker does deeper post-take analysis.
