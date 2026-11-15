@@ -4,3 +4,6 @@ dist
 .env.local
 *.log
 .vercel
+.env.vercel
+.env*.local
+.impeccable/
