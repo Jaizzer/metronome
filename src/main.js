@@ -1,8 +1,12 @@
 // ============================================================
-// main.js — app logic. Metronome engine, builder UI, and mastery
-// tracking are unchanged from the original; only persistence has
-// moved from localStorage to Neon (via db.js).
+// main.js — app logic: auth flow, routine builder, audio engine,
+// player, and the ✓/✗ record (buttons, foot pedal, undo).
+// Persistence goes through db.js; gesture timing lives in pedal.js;
+// tallies and the undo stack live in records.js.
 // ============================================================
+import '@fontsource/barlow-condensed/600.css';
+import '@fontsource/barlow-condensed/700.css';
+import './style.css';
 import {
 	signUp,
 	signIn,
@@ -15,207 +19,309 @@ import {
 	insertPractice,
 	updatePractice,
 	deletePractice,
-	reorderPractices,
 	fetchMasteryCounts,
 	upsertMasteryCounts,
 	fetchSettings,
 	upsertSettings,
 } from './db.js';
+import { createPedal } from './pedal.js';
+import { createRecorder, sectionStats, routineStats, formatAccuracy } from './records.js';
+import { icons } from './icons.js';
 
-window.practices = [];
-let counts = { s: 0, f: 0 };
+const $ = (id) => document.getElementById(id);
+
+// Tiny element builder: h('button', { class: 'btn', onclick }, 'Label').
+// Strings become text nodes, so user content is never parsed as HTML.
+function h(tag, props = {}, ...children) {
+	const el = document.createElement(tag);
+	for (const [k, v] of Object.entries(props)) {
+		if (v === undefined || v === null || v === false) continue;
+		if (k === 'class') el.className = v;
+		else if (k === 'html') el.innerHTML = v; // only ever our own icon markup
+		else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+		else if (k in el && typeof v !== 'string') el[k] = v;
+		else el.setAttribute(k, v === true ? '' : v);
+	}
+	for (const c of children.flat()) {
+		if (c === null || c === undefined || c === false) continue;
+		el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+	}
+	return el;
+}
+
+const iconEl = (name) => h('span', { html: icons[name], style: 'display:contents' });
+
+// ---------------- State ----------------
+
+let practices = [];
+const totals = { s: 0, f: 0 }; // all-time (mastery_counts)
 let showStats = true;
 let metVolume = 0.8;
 let currentSession = null;
+let booting = false;
+const recorder = createRecorder(totals);
 
-// Debounce writes so typing in a name field doesn't fire a request per keystroke.
-let saveTimer = null;
-function scheduleSave(fn, delay = 500) {
-	clearTimeout(saveTimer);
-	saveTimer = setTimeout(fn, delay);
+// The section records go to when nothing is playing.
+let selectedPracticeId = null;
+let selectedSection = null;
+
+// ---------------- Saving (debounced per kind) ----------------
+
+const pendingSaves = new Map(); // key → { timer, fn }
+let savesInFlight = 0;
+
+function debounce(key, fn, delay) {
+	clearTimeout(pendingSaves.get(key)?.timer);
+	const timer = setTimeout(() => {
+		pendingSaves.delete(key);
+		fn();
+	}, delay);
+	pendingSaves.set(key, { timer, fn });
 }
 
-function setSyncIndicator(state) {
-	const el = document.getElementById('sync-indicator');
-	if (!el) return;
-	el.classList.remove('error');
-	if (state === 'saving') el.textContent = 'SAVING…';
-	else if (state === 'synced') el.textContent = 'SYNCED';
-	else if (state === 'error') {
-		el.textContent = 'SYNC FAILED';
-		el.classList.add('error');
+// Run every queued save now (tab hidden, signing out).
+function flushSaves() {
+	for (const [key, { timer, fn }] of pendingSaves) {
+		clearTimeout(timer);
+		pendingSaves.delete(key);
+		fn();
 	}
 }
 
-// Wraps a write call with sync-indicator feedback + error surfacing.
+function setSyncIndicator(state) {
+	const el = $('sync-indicator');
+	el.classList.toggle('error', state === 'error');
+	el.textContent = state === 'saving' ? 'Saving…' : state === 'error' ? 'Not saved' : 'Synced';
+}
+
+// Wraps a write with sync-indicator feedback. Never alert(): a modal
+// dialog in the middle of a run would stop the practice.
 async function withSync(promise) {
+	savesInFlight++;
 	setSyncIndicator('saving');
 	try {
 		const result = await promise;
-		setSyncIndicator('synced');
+		if (--savesInFlight === 0) setSyncIndicator('synced');
 		return result;
 	} catch (e) {
+		savesInFlight--;
 		console.error('Sync failed:', e);
 		setSyncIndicator('error');
-		alert('Could not save to the server: ' + (e.message || e));
+		toast(`Couldn't save: ${e.message || e}. Retrying on your next change.`, 'error', 4000);
 		throw e;
 	}
 }
 
-window.save = function () {
-	// Persists the *entire* practices array's metronomes/name/loop fields
-	// for every practice — used after bulk operations like delete/reorder
-	// where diffing individual fields isn't worth the complexity.
-	scheduleSave(async () => {
+const dirtyPractices = new Set();
+
+function savePractice(p) {
+	if (!p?.id) return;
+	dirtyPractices.add(p.id);
+	debounce('practices', flushPractices, 500);
+}
+
+async function flushPractices() {
+	const ids = [...dirtyPractices];
+	dirtyPractices.clear();
+	const list = ids.map((id) => practices.find((p) => p.id === id)).filter(Boolean);
+	if (!list.length) return;
+	try {
 		await withSync(
 			Promise.all(
-				window.practices.map((p) =>
+				list.map((p) =>
 					updatePractice(p.id, { name: p.name, loop: p.loop, metronomes: p.metronomes }),
 				),
 			),
 		);
-	});
-};
+	} catch {
+		ids.forEach((id) => dirtyPractices.add(id)); // retried with the next save
+	}
+}
 
 function saveMasteryCounts() {
-	scheduleSave(() => withSync(upsertMasteryCounts(counts.s, counts.f)), 300);
+	debounce('mastery', () => withSync(upsertMasteryCounts(totals.s, totals.f)).catch(() => {}), 300);
 }
 
 function saveSettings() {
-	scheduleSave(() => withSync(upsertSettings(showStats, metVolume)), 300);
+	debounce('settings', () => withSync(upsertSettings(showStats, metVolume)).catch(() => {}), 300);
+}
+
+document.addEventListener('visibilitychange', () => {
+	if (document.visibilityState === 'hidden') flushSaves();
+});
+window.addEventListener('pagehide', flushSaves);
+
+// ---------------- Views + toast ----------------
+
+const VIEWS = ['auth', 'verify', 'builder', 'player'];
+let view = 'auth';
+
+function showView(name) {
+	view = name;
+	for (const v of VIEWS) $(v).hidden = v !== name;
+	window.scrollTo(0, 0);
+}
+
+let toastTimer = null;
+// kind: 'good' | 'bad' | 'undo' | 'error' | ''. content: string or Node.
+function toast(content, kind = '', ms = 1400) {
+	const el = $('toast');
+	el.className = `toast ${kind}`;
+	el.replaceChildren(content instanceof Node ? content : document.createTextNode(content));
+	void el.offsetWidth; // restart the slide-in
+	el.classList.add('show');
+	clearTimeout(toastTimer);
+	toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
 
 // ---------------- Auth flow ----------------
 
-let authMode = 'signin'; // or "signup"
-let pendingVerifyEmail = null; // set when we route to the verify screen
+let authMode = 'signin'; // or 'signup'
+let pendingVerifyEmail = null;
+let pendingPassword = null; // kept in memory only, to sign in right after verifying
+
+function setAuthMode(mode) {
+	authMode = mode;
+	const signup = mode === 'signup';
+	$('auth-title').textContent = signup ? 'Create account' : 'Sign in';
+	$('auth-submit').textContent = signup ? 'Create account' : 'Sign in';
+	$('auth-toggle').textContent = signup ? 'Have an account? Sign in' : 'New here? Create an account';
+	$('auth-password').autocomplete = signup ? 'new-password' : 'current-password';
+	showAuthError('');
+}
 
 function showAuthError(msg) {
-	document.getElementById('auth-error').textContent = msg || '';
+	$('auth-error').textContent = msg || '';
 }
 
 function showVerifyError(msg) {
-	document.getElementById('verify-error').textContent = msg || '';
-}
-
-function showAuthScreen() {
-	document.getElementById('verify').style.display = 'none';
-	document.getElementById('auth').style.display = 'flex';
+	$('verify-error').textContent = msg || '';
 }
 
 function showVerifyScreen(email, instructions) {
 	pendingVerifyEmail = email;
-	document.getElementById('verify-instructions').textContent =
-		instructions || `Enter the code we emailed to ${email}.`;
-	document.getElementById('verify-code').value = '';
+	$('verify-instructions').textContent = instructions;
+	$('verify-code').value = '';
 	showVerifyError('');
-	document.getElementById('auth').style.display = 'none';
-	document.getElementById('verify').style.display = 'flex';
+	showView('verify');
+	$('verify-code').focus();
 }
 
-// Neon Auth returns a distinct error for "you signed up but haven't
-// verified your email yet" rather than a generic auth failure — we route
-// to the verify screen instead of just showing the raw error text.
+// Neon Auth returns a distinct error for "signed up but not verified" —
+// route to the code screen instead of showing the raw error.
 function isUnverifiedEmailError(e) {
 	const msg = (e?.message || '').toLowerCase();
 	const code = (e?.code || '').toLowerCase();
 	return msg.includes('verif') || code.includes('verif') || code.includes('email_not_verified');
 }
 
-document.getElementById('auth-toggle').onclick = () => {
-	authMode = authMode === 'signin' ? 'signup' : 'signin';
-	document.getElementById('auth-submit').textContent =
-		authMode === 'signin' ? 'SIGN IN' : 'CREATE ACCOUNT';
-	document.getElementById('auth-toggle').textContent =
-		authMode === 'signin' ? 'Need an account? Sign up' : 'Already have an account? Sign in';
-	showAuthError('');
-};
+function friendlyAuthError(e) {
+	const code = (e?.code || e?.body?.code || '').toUpperCase();
+	if (code === 'INVALID_EMAIL_OR_PASSWORD') return 'That email and password don’t match. Check both and try again.';
+	if (code === 'USER_ALREADY_EXISTS' || code.includes('ALREADY_EXISTS'))
+		return 'An account with this email already exists. Sign in instead.';
+	if (code === 'PASSWORD_TOO_SHORT') return 'Use a password of at least 8 characters.';
+	if (code === 'INVALID_EMAIL') return 'That email address doesn’t look right.';
+	return e?.message || 'Something went wrong. Try again.';
+}
 
-document.getElementById('auth-submit').onclick = async () => {
-	const email = document.getElementById('auth-email').value.trim();
-	const password = document.getElementById('auth-password').value;
-	if (!email || !password) return showAuthError('Enter an email and password.');
+$('auth-toggle').onclick = () => setAuthMode(authMode === 'signin' ? 'signup' : 'signin');
 
-	document.getElementById('auth-status').textContent = 'Connecting…';
+$('auth-form').onsubmit = async (e) => {
+	e.preventDefault();
+	const email = $('auth-email').value.trim();
+	const password = $('auth-password').value;
+	if (!email || !password) return showAuthError('Enter your email and password.');
+	if (authMode === 'signup' && password.length < 8)
+		return showAuthError('Use a password of at least 8 characters.');
+
+	const submit = $('auth-submit');
+	submit.disabled = true;
+	$('auth-status').textContent = authMode === 'signup' ? 'Creating your account…' : 'Signing in…';
 	showAuthError('');
 	try {
 		if (authMode === 'signup') {
 			await signUp(email, password);
-			document.getElementById('auth-status').textContent = '';
-			showVerifyScreen(
-				email,
-				`We emailed a code to ${email}. Enter it below to finish creating your account.`,
-			);
+			pendingPassword = password;
+			showVerifyScreen(email, `We emailed a 6-digit code to ${email}. Enter it to finish creating your account.`);
 		} else {
 			await signIn(email, password);
-			// onAuthChange fires and boots the app, unless email isn't verified yet
+			const session = await getSession();
+			if (session) await bootApp(session);
 		}
-	} catch (e) {
-		if (isUnverifiedEmailError(e)) {
-			document.getElementById('auth-status').textContent = '';
-			showVerifyScreen(
-				email,
-				`Your email isn't verified yet. Enter the code we sent to ${email}, or resend a new one.`,
-			);
+	} catch (err) {
+		if (isUnverifiedEmailError(err)) {
+			pendingPassword = password;
+			showVerifyScreen(email, `Your email isn’t verified yet. Enter the code we sent to ${email}, or send a new one.`);
 		} else {
-			showAuthError(e.message || 'Something went wrong.');
-			document.getElementById('auth-status').textContent = '';
+			showAuthError(friendlyAuthError(err));
 		}
+	} finally {
+		submit.disabled = false;
+		$('auth-status').textContent = '';
 	}
 };
 
-document.getElementById('verify-submit').onclick = async () => {
-	const code = document.getElementById('verify-code').value.trim();
-	if (!code) return showVerifyError('Enter the code from your email.');
-	if (!pendingVerifyEmail)
-		return showVerifyError('Something went wrong — go back and sign in again.');
+$('verify-form').onsubmit = async (e) => {
+	e.preventDefault();
+	const code = $('verify-code').value.trim();
+	if (!/^\d{6}$/.test(code)) return showVerifyError('Enter the 6-digit code from the email.');
+	if (!pendingVerifyEmail) return showVerifyError('Go back and sign in again.');
 
+	const submit = $('verify-submit');
+	submit.disabled = true;
 	showVerifyError('');
 	try {
-		const data = await verifyEmail(pendingVerifyEmail, code);
-		if (data?.session) {
-			// Verification auto-signed us in; onAuthChange will boot the app.
-			return;
+		await verifyEmail(pendingVerifyEmail, code);
+		let session = await getSession();
+		if (!session && pendingPassword) {
+			await signIn(pendingVerifyEmail, pendingPassword);
+			session = await getSession();
 		}
-		// Verified but not auto-signed-in: send them to sign in normally.
-		authMode = 'signin';
-		document.getElementById('auth-submit').textContent = 'SIGN IN';
-		document.getElementById('auth-toggle').textContent = 'Need an account? Sign up';
-		document.getElementById('auth-email').value = pendingVerifyEmail;
-		showAuthScreen();
-		document.getElementById('auth-status').textContent =
-			'Email verified — sign in to continue.';
-	} catch (e) {
-		showVerifyError(e.message || "That code didn't work. Check it and try again.");
+		pendingPassword = null;
+		if (session) return bootApp(session);
+		// Verified but not signed in: back to sign-in with the email filled.
+		setAuthMode('signin');
+		$('auth-email').value = pendingVerifyEmail;
+		showView('auth');
+		$('auth-status').textContent = 'Email verified. Sign in to continue.';
+		$('auth-password').focus();
+	} catch (err) {
+		showVerifyError(err.message || 'That code didn’t work. Check it, or send a new one.');
+	} finally {
+		submit.disabled = false;
 	}
 };
 
-document.getElementById('verify-resend').onclick = async () => {
+$('verify-resend').onclick = async () => {
 	if (!pendingVerifyEmail) return;
 	showVerifyError('');
 	try {
 		await resendVerification(pendingVerifyEmail);
-		showVerifyError('New code sent. Check your email.');
-	} catch (e) {
-		showVerifyError(e.message || "Couldn't resend the code. Try again shortly.");
+		showVerifyError('New code sent. Check your email (and spam).');
+	} catch (err) {
+		showVerifyError(err.message || 'Couldn’t send a new code. Wait a minute and try again.');
 	}
 };
 
-document.getElementById('verify-back').onclick = () => {
+$('verify-back').onclick = () => {
 	pendingVerifyEmail = null;
-	showAuthScreen();
+	pendingPassword = null;
+	showView('auth');
 };
 
-document.getElementById('signOutBtn').onclick = async () => {
+$('signOutBtn').onclick = async () => {
+	flushSaves();
 	await signOut();
 	location.reload();
 };
 
 async function bootApp(session) {
+	if (currentSession || booting) return;
+	booting = true;
 	currentSession = session;
-	document.getElementById('auth').style.display = 'none';
-	document.getElementById('verify').style.display = 'none';
-	document.getElementById('builder').style.display = 'block';
+	showView('builder');
+	setSyncIndicator('saving');
 
 	try {
 		const [fetchedPractices, masteryCounts, settings] = await Promise.all([
@@ -223,22 +329,25 @@ async function bootApp(session) {
 			fetchMasteryCounts(),
 			fetchSettings(),
 		]);
-		window.practices = fetchedPractices;
-		counts = { s: masteryCounts.success, f: masteryCounts.fail };
+		practices = fetchedPractices.map((p) => ({ ...p, metronomes: p.metronomes ?? [] }));
+		totals.s = masteryCounts.success;
+		totals.f = masteryCounts.fail;
 		showStats = settings.show_stats;
 		metVolume = parseFloat(settings.volume);
+		setSyncIndicator('synced');
 	} catch (e) {
 		console.error('Initial load failed:', e);
-		alert('Could not load your data from the server: ' + (e.message || e));
-		window.practices = [];
+		setSyncIndicator('error');
+		toast(`Couldn't load your data: ${e.message || e}`, 'error', 5000);
+		practices = [];
 	}
 
-	render();
-	updateMasteryUI();
+	restoreSelection();
+	renderBuilder();
 	applyStatsVisibility();
-	const slider = document.getElementById('volumeSlider');
-	slider.value = metVolume;
-	document.getElementById('volume-pct').textContent = Math.round((metVolume / 3) * 100) + '%';
+	$('volumeSlider').value = metVolume;
+	updateVolumeLabel();
+	booting = false;
 }
 
 async function init() {
@@ -246,93 +355,237 @@ async function init() {
 		if (session && !currentSession) bootApp(session);
 		if (!session && currentSession) location.reload();
 	});
-	const session = await getSession();
-	if (session) {
-		await bootApp(session);
-	} else {
-		document.getElementById('auth-status').textContent = '';
+	setAuthMode('signin');
+	$('auth-status').textContent = 'Checking your session…';
+	try {
+		const session = await getSession();
+		if (session) await bootApp(session);
+	} catch (e) {
+		console.error('Session check failed:', e);
 	}
+	$('auth-status').textContent = '';
 }
 
-// ---------------- Mastery UI ----------------
+// ---------------- Selection (where records go when not playing) ----------------
 
-function updateMasteryUI() {
-	document.getElementById('success-count').textContent = counts.s;
-	document.getElementById('fail-count').textContent = counts.f;
-	const total = counts.s + counts.f;
-	const acc = total === 0 ? 0 : Math.round((counts.s / total) * 100);
-	document.getElementById('accuracy-box').textContent = acc + '%';
-	document.getElementById('accuracy-box').style.opacity = acc >= 80 ? '1' : '0.6';
+const SELECTION_KEY = 'metronome:selection';
+
+function restoreSelection() {
+	let saved = null;
+	try {
+		saved = JSON.parse(localStorage.getItem(SELECTION_KEY) || 'null');
+	} catch {
+		saved = null;
+	}
+	const p = practices.find((x) => x.id === saved?.practiceId) || practices[0];
+	selectedPracticeId = p?.id ?? null;
+	selectedSection = p?.metronomes[Math.min(saved?.index ?? 0, p.metronomes.length - 1)] ?? null;
 }
 
-function applyStatsVisibility() {
-	document.getElementById('stats-ui').style.display = showStats ? 'flex' : 'none';
-	document.getElementById('mastery-layer').style.display = showStats ? 'flex' : 'none';
-	document.getElementById('toggleStats').textContent = `STATS: ${showStats ? 'ON' : 'OFF'}`;
+function selectSection(p, section) {
+	selectedPracticeId = p.id;
+	selectedSection = section;
+	try {
+		localStorage.setItem(
+			SELECTION_KEY,
+			JSON.stringify({ practiceId: p.id, index: p.metronomes.indexOf(section) }),
+		);
+	} catch {
+		// private mode etc. — selection just won't persist
+	}
+	document.querySelectorAll('.sec').forEach((li) => {
+		li.classList.toggle('is-selected', li._section === section);
+	});
+	renderRecordBar();
 }
 
-document.getElementById('success-zone').onclick = () => {
-	counts.s++;
-	flashZone('success-zone', 'success-flash');
+// The section a record is attributed to: the playing one, else the selected one.
+function currentTarget() {
+	if (view === 'player' && activePractice && activeMetIndex >= 0) {
+		return { practice: activePractice, section: activePractice.metronomes[activeMetIndex] ?? null };
+	}
+	const p = practices.find((x) => x.id === selectedPracticeId) || practices[0];
+	if (!p) return null;
+	const section = p.metronomes.includes(selectedSection) ? selectedSection : (p.metronomes[0] ?? null);
+	return { practice: p, section };
+}
+
+// ---------------- Recording ✓ / ✗ ----------------
+
+function record(kind) {
+	const target = currentTarget();
+	recorder.record(kind, target);
+	if (target?.practice) savePractice(target.practice);
 	saveMasteryCounts();
-	updateMasteryUI();
-};
-document.getElementById('fail-zone').onclick = () => {
-	counts.f++;
-	flashZone('fail-zone', 'fail-flash');
+	refreshStats();
+
+	const good = kind === 's';
+	strike(good ? 'success-zone' : 'fail-zone', 'is-struck', 450);
+	strike(good ? 'bar-good' : 'bar-bad', 'is-struck', 450);
+	const where = target?.section?.name ? ` · ${target.section.name}` : '';
+	toast(`${good ? '✓ Good run' : '✗ Bad run'}${where}`, good ? 'good' : 'bad');
+}
+
+function undoLast() {
+	const entry = recorder.undo();
+	if (!entry) {
+		toast('Nothing to undo');
+		return;
+	}
+	if (entry.practice && !entry.sectionGone) savePractice(entry.practice);
 	saveMasteryCounts();
-	updateMasteryUI();
-};
+	refreshStats();
 
-// Foot pedal (Enter key) with 1-second window for consecutive detection
-let lastPedalPressTime = 0;
-let pendingSuccessTimeout = null;
-window.addEventListener('keydown', (e) => {
-	if (e.key === 'Enter') {
-		const now = Date.now();
-		const timeSinceLastPress = now - lastPedalPressTime;
+	const good = entry.kind === 's';
+	strike(good ? 'success-zone' : 'fail-zone', 'is-undone', 900);
+	const msg = h(
+		'span',
+		{},
+		'Undone: ',
+		h('s', {}, good ? '✓ Good run' : '✗ Bad run'),
+		entry.sectionName ? ` · ${entry.sectionName}` : '',
+	);
+	toast(msg, 'undo', 2000);
+}
 
-		if (timeSinceLastPress < 1000) {
-			clearTimeout(pendingSuccessTimeout);
-			counts.f++;
-			flashZone('fail-zone', 'fail-flash');
-			lastPedalPressTime = now;
-			saveMasteryCounts();
-			updateMasteryUI();
-		} else {
-			lastPedalPressTime = now;
-			clearTimeout(pendingSuccessTimeout);
-			pendingSuccessTimeout = setTimeout(() => {
-				counts.s++;
-				flashZone('success-zone', 'success-flash');
-				saveMasteryCounts();
-				updateMasteryUI();
-			}, 1000);
+function cancelPendingToast() {
+	toast(h('span', {}, 'Undone: ', h('s', {}, 'pending ✓')), 'undo', 1600);
+}
+
+// Re-trigger a one-shot class (the overprint flash, the struck-out undo).
+function strike(id, cls, ms) {
+	const el = $(id);
+	if (!el || el.offsetParent === null) return;
+	el.classList.remove(cls);
+	void el.offsetWidth;
+	el.classList.add(cls);
+	clearTimeout(el._strikeTimer);
+	el._strikeTimer = setTimeout(() => el.classList.remove(cls), ms);
+}
+
+const pedal = createPedal({
+	onGood: () => record('s'),
+	onBad: () => record('f'),
+	onUndo: ({ cancelledPending }) => (cancelledPending ? cancelPendingToast() : undoLast()),
+	onPending: (on) => {
+		for (const id of ['pedal-pending', 'bar-pending']) {
+			const el = $(id);
+			el.hidden = !on; // un-hiding restarts the shrinking dot that times the window
 		}
+		$('pedal-hint').hidden = on;
+	},
+});
+
+$('success-zone').onclick = () => record('s');
+$('fail-zone').onclick = () => record('f');
+$('bar-good').onclick = () => record('s');
+$('bar-bad').onclick = () => record('f');
+$('undoBtn').onclick = undoLast;
+$('bar-undo').onclick = undoLast;
+
+// Text-entry targets keep Enter and Cmd/Ctrl+Z for themselves.
+function isTypingTarget(el) {
+	return Boolean(
+		el?.closest?.(
+			'input:not([type=range]):not([type=checkbox]):not([type=button]), textarea, select, [contenteditable=""], [contenteditable="true"]',
+		),
+	);
+}
+
+window.addEventListener('keydown', (e) => {
+	if (!currentSession || $('modal').open) return;
+	if (isTypingTarget(e.target)) return;
+
+	// Foot pedal (sends Enter). Handled on keydown + keyup in pedal.js.
+	if (e.key === 'Enter') {
+		e.preventDefault(); // don't also "click" whatever button has focus
+		pedal.keydown(e);
+		return;
+	}
+	if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
 		e.preventDefault();
+		if (!e.repeat) undoLast();
+		return;
+	}
+	if (view !== 'player') return;
+	const onRange = e.target?.type === 'range';
+	if (e.key === ' ' && !(e.target instanceof HTMLButtonElement) && !onRange) {
+		e.preventDefault();
+		if (!e.repeat) togglePause();
+	} else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !onRange) {
+		e.preventDefault();
+		adjustBPM((e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 5 : 1));
+	} else if (e.key === 'PageUp' || e.key === 'PageDown') {
+		e.preventDefault();
+		adjustBPM(e.key === 'PageUp' ? 5 : -5);
 	}
 });
 
-function flashZone(id, cls) {
-	const el = document.getElementById(id);
-	el.classList.add(cls);
-	setTimeout(() => el.classList.remove(cls), 150);
+window.addEventListener('keyup', (e) => {
+	if (e.key === 'Enter') pedal.keyup();
+});
+window.addEventListener('blur', () => pedal.cancelPress());
+
+// ---------------- Stats display ----------------
+
+function tallyInline(st) {
+	return h(
+		'span',
+		{ class: 'tally-inline', title: `${st.s} good, ${st.f} bad` },
+		h('span', { class: 'g' }, `✓ ${st.s}`),
+		h('span', { class: 'b' }, `✗ ${st.f}`),
+		h('span', { class: 'a' }, formatAccuracy(st)),
+	);
 }
 
-document.getElementById('resetStats').onclick = () => {
-	counts = { s: 0, f: 0 };
-	saveMasteryCounts();
-	updateMasteryUI();
-};
-document.getElementById('toggleStats').onclick = () => {
+function renderAlltime() {
+	$('alltime').replaceChildren(
+		h('span', {}, 'All-time '),
+		h('b', {}, `✓ ${totals.s}`),
+		h('b', {}, `✗ ${totals.f}`),
+		h('span', {}, 'accuracy ', h('b', {}, formatAccuracy(totals))),
+	);
+}
+
+function refreshStats() {
+	if (view === 'player') updateTally();
+	else renderBuilder({ keepFocus: true });
+}
+
+function applyStatsVisibility() {
+	$('stats-ui').hidden = !showStats;
+	$('tally-foot').hidden = !showStats;
+	$('toggleStats').setAttribute('aria-checked', String(showStats));
+}
+
+$('toggleStats').onclick = () => {
 	showStats = !showStats;
 	applyStatsVisibility();
 	saveSettings();
 };
 
-document.getElementById('volumeSlider').oninput = (e) => {
+$('resetStats').onclick = () => {
+	confirmDialog({
+		title: 'Reset all-time stats?',
+		text: `Sets your all-time ✓ ${totals.s} / ✗ ${totals.f} back to zero. Per-section stats are kept.`,
+		confirm: 'Reset',
+		onConfirm: () => {
+			totals.s = 0;
+			totals.f = 0;
+			recorder.clear();
+			saveMasteryCounts();
+			refreshStats();
+		},
+	});
+};
+
+function updateVolumeLabel() {
+	$('volume-pct').textContent = Math.round((metVolume / 3) * 100) + '%';
+}
+
+$('volumeSlider').oninput = (e) => {
 	metVolume = parseFloat(e.target.value);
-	document.getElementById('volume-pct').textContent = Math.round((metVolume / 3) * 100) + '%';
+	updateVolumeLabel();
 	saveSettings();
 };
 
@@ -363,7 +616,7 @@ function playClick(time, accented) {
 	const gain = audioCtx.createGain();
 	osc.type = 'triangle';
 	osc.frequency.setValueAtTime(accented ? 1600 : 900, time);
-	gain.gain.setValueAtTime(metVolume, time);
+	gain.gain.setValueAtTime(Math.max(0.0001, metVolume), time);
 	gain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
 	osc.connect(gain);
 	gain.connect(audioCtx.destination);
@@ -372,16 +625,15 @@ function playClick(time, accented) {
 }
 
 function lightUpDot(beatIndex) {
-	document.querySelectorAll('.dot').forEach((d) => (d.className = 'dot'));
-	const dot = document.getElementById(`dot-${beatIndex}`);
-	if (dot) dot.classList.add(beatIndex === 0 ? 'active-accent' : 'active-normal');
+	for (let i = 0; i < 4; i++) $(`dot-${i}`).classList.toggle('on', i === beatIndex);
 }
 
 function scheduler() {
 	if (isPaused) return;
 	while (nextTickTime < audioCtx.currentTime + 0.1) {
 		const beat = beatCounter % 4;
-		playClick(nextTickTime, beat === 0);
+		const tickTime = nextTickTime;
+		playClick(tickTime, beat === 0);
 		if (isRamping && totalSectionTime > 0) {
 			const elapsed = totalSectionTime - timeLeftInSection;
 			const t = Math.min(elapsed / totalSectionTime, 1);
@@ -389,523 +641,773 @@ function scheduler() {
 			adjustBPMDisplay();
 		}
 		nextTickTime += 60 / currentBPM;
-		const capturedBeat = beat;
 		setTimeout(
 			() => {
-				if (!isPaused) lightUpDot(capturedBeat);
+				if (!isPaused) lightUpDot(beat);
 			},
-			(nextTickTime - audioCtx.currentTime) * 1000 - (60 / currentBPM) * 1000,
+			Math.max(0, (tickTime - audioCtx.currentTime) * 1000),
 		);
 		beatCounter++;
 	}
 }
 
 function runSection(index) {
-	if (!activePractice || index >= activePractice.metronomes.length) {
-		if (activePractice?.loop) return runSection(0);
-		return stopEverything();
+	if (!activePractice || !activePractice.metronomes.length) return stopEverything();
+	if (index < 0) index = 0;
+	if (index >= activePractice.metronomes.length) {
+		if (activePractice.loop) index = 0;
+		else return stopEverything({ finished: true });
 	}
 	activeMetIndex = index;
 	const met = activePractice.metronomes[index];
 	sectionStartBPM = met.startBPM;
-	sectionEndBPM = met.ramp ? met.endBPM : met.startBPM;
-	isRamping = met.ramp && met.endBPM && met.endBPM !== met.startBPM;
+	sectionEndBPM = met.ramp ? met.endBPM || met.startBPM : met.startBPM;
+	isRamping = Boolean(met.ramp && met.endBPM && met.endBPM !== met.startBPM);
 	currentBPM = sectionStartBPM;
 	timeLeftInSection = met.duration;
 	totalSectionTime = met.duration;
 	adjustBPMDisplay();
 	updatePlayerUI();
 	beatCounter = 0;
-	nextTickTime = audioCtx.currentTime;
+	nextTickTime = audioCtx.currentTime + 0.05;
 	updateProgressBar(1);
 
 	if (!schedulerInterval) schedulerInterval = setInterval(scheduler, 25);
 	startCountdown();
 }
 
+function formatClock(seconds) {
+	const s = Math.max(0, seconds);
+	const h = Math.floor(s / 3600);
+	const m = Math.floor((s % 3600) / 60);
+	const sec = String(s % 60).padStart(2, '0');
+	return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+
 function startCountdown() {
 	clearInterval(countdownInterval);
-	document.getElementById('remaining').textContent = `${timeLeftInSection}s`;
+	$('remaining').textContent = formatClock(timeLeftInSection);
 	countdownInterval = setInterval(() => {
-		if (!isPaused) {
-			timeLeftInSection--;
-			document.getElementById('remaining').textContent = `${Math.max(0, timeLeftInSection)}s`;
-			const fraction = totalSectionTime > 0 ? timeLeftInSection / totalSectionTime : 0;
-			updateProgressBar(fraction);
-			if (timeLeftInSection <= 0) {
-				clearInterval(countdownInterval);
-				runSection(activeMetIndex + 1);
-			}
+		if (isPaused) return;
+		timeLeftInSection--;
+		$('remaining').textContent = formatClock(timeLeftInSection);
+		updateProgressBar(totalSectionTime > 0 ? timeLeftInSection / totalSectionTime : 0);
+		if (timeLeftInSection <= 0) {
+			clearInterval(countdownInterval);
+			runSection(activeMetIndex + 1);
 		}
 	}, 1000);
 }
 
 function updateProgressBar(fraction) {
-	document.getElementById('progress-bar').style.width = fraction * 100 + '%';
+	$('progress-bar').style.width = Math.max(0, fraction) * 100 + '%';
 }
 
 function adjustBPMDisplay() {
 	currentBPM = Math.round(Math.max(20, Math.min(300, currentBPM)));
-	const rotation = ((currentBPM - 20) / (300 - 20)) * 300 - 150;
-	document.getElementById('knob').style.transform = `rotate(${rotation}deg)`;
-	document.getElementById('bpm-display').textContent = currentBPM;
+	const el = $('bpm-display');
+	el.textContent = currentBPM;
+	el.setAttribute('aria-valuenow', currentBPM);
 }
 
+// Manual tempo change during playback: stops any ramp and becomes the
+// section's tempo (persisted), same as before the redesign.
 function adjustBPM(amount) {
+	if (!activePractice || activeMetIndex < 0) return;
 	currentBPM = Math.round(Math.max(20, Math.min(300, currentBPM + amount)));
 	isRamping = false;
 	adjustBPMDisplay();
-	if (activePractice && activeMetIndex >= 0) {
-		activePractice.metronomes[activeMetIndex].startBPM = currentBPM;
-		activePractice.metronomes[activeMetIndex].ramp = false;
-		window.save();
-	}
+	const met = activePractice.metronomes[activeMetIndex];
+	met.startBPM = currentBPM;
+	met.ramp = false;
+	$('bpm-unit').textContent = 'BPM';
+	savePractice(activePractice);
+}
+
+function togglePause() {
+	isPaused = !isPaused;
+	if (!isPaused && audioCtx) nextTickTime = audioCtx.currentTime + 0.05; // no catch-up burst
+	renderPlayButton();
+	if (isPaused) lightUpDot(-1);
+}
+
+function renderPlayButton() {
+	const btn = $('playPause');
+	btn.innerHTML = isPaused ? icons.play : icons.pause;
+	btn.setAttribute('aria-label', isPaused ? 'Play' : 'Pause');
 }
 
 function updatePlayerUI() {
 	if (activeMetIndex === -1) return;
-	const met = activePractice.metronomes[activeMetIndex];
-	let labelText = met.name;
-	if (met.ramp && met.endBPM) labelText += ` (${met.startBPM}→${met.endBPM})`;
-	document.getElementById('label').textContent = labelText;
-	const next =
-		activePractice.metronomes[activeMetIndex + 1] ||
-		(activePractice.loop ? activePractice.metronomes[0] : null);
-	document.getElementById('upcoming-details').textContent = next
-		? `NEXT: ${next.name} (${next.startBPM} BPM)`
-		: 'FINAL PART';
+	const list = activePractice.metronomes;
+	const met = list[activeMetIndex];
+	$('player-title').textContent = activePractice.name;
+	$('player-pos').textContent = `${activeMetIndex + 1}/${list.length}`;
+	$('label').textContent = met.name;
+	$('bpm-unit').textContent =
+		met.ramp && met.endBPM && met.endBPM !== met.startBPM ? `BPM · ramp ${met.startBPM} → ${met.endBPM}` : 'BPM';
+
+	const next = list[activeMetIndex + 1] || (activePractice.loop ? list[0] : null);
+	$('upcoming-details').textContent = next
+		? `Next: ${next.name} · ${next.startBPM} BPM · ${formatClock(next.duration)}${list[activeMetIndex + 1] ? '' : ' (loop)'}`
+		: 'Last section';
+	$('prevBtn').disabled = activeMetIndex === 0;
+
+	$('stops').replaceChildren(
+		...list.map((m, i) =>
+			h(
+				'li',
+				{ class: i < activeMetIndex ? 'is-done' : i === activeMetIndex ? 'is-current' : '' },
+				h('button', {
+					class: 'stop',
+					type: 'button',
+					'aria-label': `Go to section ${i + 1}: ${m.name}`,
+					'aria-current': i === activeMetIndex ? 'step' : null,
+					onclick: () => runSection(i),
+				}),
+			),
+		),
+	);
+	updateTally();
 }
 
-function stopEverything() {
+function updateTally() {
+	if (!activePractice || activeMetIndex < 0) return;
+	const sec = sectionStats(activePractice.metronomes[activeMetIndex]);
+	const rt = routineStats(activePractice);
+	$('success-count').textContent = sec.s;
+	$('fail-count').textContent = sec.f;
+	$('success-sub').textContent = `This section · routine ${rt.s}`;
+	$('fail-sub').textContent = `This section · routine ${rt.f}`;
+	$('tally-foot').replaceChildren(
+		h('span', {}, 'Section ', h('b', {}, formatAccuracy(sec))),
+		h('span', {}, 'Routine ', h('b', {}, formatAccuracy(rt))),
+		h('span', {}, 'All-time ', h('b', {}, `${formatAccuracy(totals)} of ${totals.s + totals.f}`)),
+	);
+	$('undoBtn').disabled = recorder.size === 0;
+}
+
+// Keep the phone screen awake while a routine plays (music-stand use).
+let wakeLock = null;
+async function requestWakeLock() {
+	try {
+		wakeLock = await navigator.wakeLock?.request('screen');
+	} catch {
+		wakeLock = null; // not supported or denied: fine
+	}
+}
+document.addEventListener('visibilitychange', () => {
+	if (document.visibilityState === 'visible' && view === 'player') requestWakeLock();
+});
+
+function startRoutine(p) {
+	if (!p.metronomes.length) return toast('Add a section first');
+	initAudio();
+	activePractice = p;
+	isPaused = false;
+	renderPlayButton();
+	showView('player');
+	runSection(0);
+	requestWakeLock();
+	$('playPause').focus();
+}
+
+function stopEverything({ finished = false } = {}) {
 	isPaused = false;
 	clearInterval(schedulerInterval);
 	clearInterval(countdownInterval);
 	schedulerInterval = null;
-	document.getElementById('builder').style.display = 'block';
-	document.getElementById('player').style.display = 'none';
-	render();
+	lightUpDot(-1);
+	wakeLock?.release?.().catch(() => {});
+	wakeLock = null;
+	if (activePractice && activeMetIndex >= 0) {
+		// Records made while playing go to the selected section afterwards too.
+		const sec = activePractice.metronomes[activeMetIndex];
+		if (sec) selectSection(activePractice, sec);
+	}
+	activePractice = null;
+	activeMetIndex = -1;
+	showView('builder');
+	renderBuilder();
+	if (finished) toast('Routine finished');
 }
 
-// ---------------- Drag-to-reorder (desktop) ----------------
+$('stop').onclick = () => stopEverything();
+$('playPause').onclick = togglePause;
+$('plus').onclick = () => adjustBPM(1);
+$('minus').onclick = () => adjustBPM(-1);
+$('nextBtn').onclick = () => runSection(activeMetIndex + 1);
+$('prevBtn').onclick = () => runSection(activeMetIndex - 1);
 
-let dragSrcPIdx = null,
-	dragSrcMIdx = null;
-
-function onDragStart(e, pIdx, mIdx) {
-	dragSrcPIdx = pIdx;
-	dragSrcMIdx = mIdx;
-	e.dataTransfer.effectAllowed = 'move';
-	setTimeout(() => e.target.closest('.met').classList.add('dragging'), 0);
+// Drag the BPM numeral up/down like a knob (1 BPM per 4px).
+{
+	const bpmEl = $('bpm-display');
+	let dragY = null;
+	let carry = 0;
+	bpmEl.addEventListener('pointerdown', (e) => {
+		dragY = e.clientY;
+		carry = 0;
+		bpmEl.setPointerCapture(e.pointerId);
+		initAudio();
+	});
+	bpmEl.addEventListener('pointermove', (e) => {
+		if (dragY === null) return;
+		carry += dragY - e.clientY;
+		dragY = e.clientY;
+		const steps = Math.trunc(carry / 4);
+		if (steps) {
+			carry -= steps * 4;
+			adjustBPM(steps);
+		}
+	});
+	const end = () => (dragY = null);
+	bpmEl.addEventListener('pointerup', end);
+	bpmEl.addEventListener('pointercancel', end);
 }
 
-function onDragEnd() {
-	document.querySelectorAll('.met').forEach((el) => el.classList.remove('dragging', 'drag-over'));
+// ---------------- Dialogs ----------------
+
+const modal = $('modal');
+
+function openDialog(title, ...content) {
+	$('modal-title').textContent = title;
+	$('modal-content').replaceChildren(...content);
+	if (!modal.open) modal.showModal();
 }
 
-function onDragOver(e) {
+function closeDialog() {
+	if (modal.open) modal.close();
+}
+
+modal.addEventListener('click', (e) => {
+	if (e.target === modal) closeDialog(); // click on the backdrop
+});
+
+function confirmDialog({ title, text, confirm, onConfirm }) {
+	openDialog(
+		title,
+		h('p', {}, text),
+		h(
+			'div',
+			{ class: 'dialog-actions' },
+			h('button', { class: 'btn', type: 'button', onclick: closeDialog, autofocus: true }, 'Cancel'),
+			h(
+				'button',
+				{
+					class: 'btn btn-danger',
+					type: 'button',
+					onclick: () => {
+						closeDialog();
+						onConfirm();
+					},
+				},
+				confirm,
+			),
+		),
+	);
+}
+
+// ---------------- Duration drum-roll picker ----------------
+
+const ITEM_H = 44;
+
+function buildDrum(id, count, label) {
+	return h(
+		'div',
+		{ class: 'drum' },
+		h('span', { id: `${id}-label` }, label),
+		h(
+			'div',
+			{ class: 'drum-window' },
+			h(
+				'div',
+				{ class: 'drum-scroll', id, tabindex: '0', role: 'group', 'aria-labelledby': `${id}-label` },
+				h('div', { class: 'drum-pad' }),
+				Array.from({ length: count }, (_, i) => h('div', { class: 'drum-item' }, String(i).padStart(2, '0'))),
+				h('div', { class: 'drum-pad' }),
+			),
+		),
+	);
+}
+
+const drumValue = (id) => Math.round($(id).scrollTop / ITEM_H);
+
+function openTimePicker(p, section) {
+	const total = section.duration;
+	const parts = { 'drum-h': Math.floor(total / 3600), 'drum-m': Math.floor((total % 3600) / 60), 'drum-s': total % 60 };
+	openDialog(
+		'Section length',
+		h('div', { class: 'drums' }, buildDrum('drum-h', 24, 'Hours'), buildDrum('drum-m', 60, 'Minutes'), buildDrum('drum-s', 60, 'Seconds')),
+		h(
+			'div',
+			{ class: 'dialog-actions' },
+			h('button', { class: 'btn', type: 'button', onclick: closeDialog }, 'Cancel'),
+			h(
+				'button',
+				{
+					class: 'btn btn-primary',
+					type: 'button',
+					onclick: () => {
+						const seconds = drumValue('drum-h') * 3600 + drumValue('drum-m') * 60 + drumValue('drum-s');
+						section.duration = Math.max(1, seconds);
+						savePractice(p);
+						closeDialog();
+						renderBuilder();
+					},
+				},
+				'Set',
+			),
+		),
+	);
+	requestAnimationFrame(() => {
+		for (const [id, v] of Object.entries(parts)) $(id).scrollTop = v * ITEM_H;
+		$('drum-m').focus();
+	});
+}
+
+// Arrow keys step a focused drum by one item.
+modal.addEventListener('keydown', (e) => {
+	const drum = e.target.closest?.('.drum-scroll');
+	if (!drum || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
 	e.preventDefault();
-	e.dataTransfer.dropEffect = 'move';
-	document.querySelectorAll('.met').forEach((el) => el.classList.remove('drag-over'));
-	e.currentTarget.classList.add('drag-over');
+	drum.scrollTop = (Math.round(drum.scrollTop / ITEM_H) + (e.key === 'ArrowDown' ? 1 : -1)) * ITEM_H;
+});
+
+// ---------------- Section reorder (mouse drag, touch drag, keyboard) ----------------
+
+function moveSection(p, from, to) {
+	if (to < 0 || to >= p.metronomes.length || from === to) return;
+	const [moved] = p.metronomes.splice(from, 1);
+	p.metronomes.splice(to, 0, moved);
+	savePractice(p);
+	renderBuilder();
 }
 
-function onDrop(e, pIdx, mIdx) {
-	e.preventDefault();
-	if (dragSrcPIdx !== pIdx || dragSrcMIdx === mIdx) return;
-	const arr = practices[pIdx].metronomes;
-	const [moved] = arr.splice(dragSrcMIdx, 1);
-	arr.splice(mIdx, 0, moved);
-	window.save();
-	render();
+let dragFrom = null; // { pIdx, mIdx }
+
+function clearDropMarks() {
+	document.querySelectorAll('.sec').forEach((el) => el.classList.remove('is-dragging', 'is-drop-target'));
 }
 
-// ---------------- Touch drag-to-reorder ----------------
-
-let touchDragPIdx = null,
-	touchDragMIdx = null,
-	touchDragEl = null,
-	touchClone = null;
+// Touch: a floating clone follows the finger; drop on another row.
+let touchDrag = null; // { pIdx, mIdx, el, clone }
 
 function onTouchDragStart(e, pIdx, mIdx) {
-	touchDragPIdx = pIdx;
-	touchDragMIdx = mIdx;
-	touchDragEl = e.currentTarget.closest('.met');
-
-	const rect = touchDragEl.getBoundingClientRect();
-	touchClone = touchDragEl.cloneNode(true);
-	touchClone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;opacity:0.7;pointer-events:none;z-index:9999;`;
-	document.body.appendChild(touchClone);
-	touchDragEl.classList.add('dragging');
+	const el = e.currentTarget.closest('.sec');
+	const rect = el.getBoundingClientRect();
+	const clone = el.cloneNode(true);
+	clone.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;opacity:0.85;pointer-events:none;z-index:99;background:var(--stock-raised);box-shadow:0 12px 32px rgba(0,0,0,.5);`;
+	document.body.appendChild(clone);
+	el.classList.add('is-dragging');
+	touchDrag = { pIdx, mIdx, el, clone };
 	e.preventDefault();
 }
 
-function onTouchDragMove(e) {
-	if (!touchClone) return;
-	const touch = e.touches[0];
-	touchClone.style.left = touch.clientX - touchClone.offsetWidth / 2 + 'px';
-	touchClone.style.top = touch.clientY - 20 + 'px';
-
-	document.querySelectorAll('.met').forEach((el) => el.classList.remove('drag-over'));
-	const el = document.elementFromPoint(touch.clientX, touch.clientY);
-	const target = el && el.closest('.met');
-	if (target) target.classList.add('drag-over');
-	e.preventDefault();
-}
-
-function onTouchDragEnd(e) {
-	if (!touchClone) return;
-	const touch = e.changedTouches[0];
-	const el = document.elementFromPoint(touch.clientX, touch.clientY);
-	const target = el && el.closest('.met');
-
-	if (target) {
-		const dropMIdx = parseInt(target.dataset.midx);
-		const dropPIdx = parseInt(target.dataset.pidx);
-		if (dropPIdx === touchDragPIdx && dropMIdx !== touchDragMIdx) {
-			const arr = practices[touchDragPIdx].metronomes;
-			const [moved] = arr.splice(touchDragMIdx, 1);
-			arr.splice(dropMIdx, 0, moved);
-			window.save();
-		}
-	}
-
-	touchClone.remove();
-	touchClone = null;
-	if (touchDragEl) touchDragEl.classList.remove('dragging');
-	document.querySelectorAll('.met').forEach((el) => el.classList.remove('drag-over'));
-	render();
-}
-
-// ---------------- Name field lock/unlock ----------------
-
-function toggleNameEdit(nameInput) {
-	nameInput.classList.toggle('unlocked');
-	if (nameInput.classList.contains('unlocked')) {
-		nameInput.focus();
-		nameInput.select();
-	}
-}
-
-// ---------------- Duration formatting + drum-roll picker ----------------
-
-function formatDuration(seconds) {
-	const h = Math.floor(seconds / 3600);
-	const m = Math.floor((seconds % 3600) / 60);
-	const s = seconds % 60;
-	if (h > 0) return `${h}h ${m}m ${s}s`;
-	if (m > 0) return `${m}m ${s}s`;
-	return `${s}s`;
-}
-
-const ITEM_H = 40;
-
-function buildDrum(id, count, selected, label) {
-	return `
-		<div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
-			<div style="font-size:9px;color:#555;font-weight:800;letter-spacing:1px;text-transform:uppercase;">${label}</div>
-			<div style="position:relative;height:${ITEM_H * 3}px;overflow:hidden;width:64px;">
-				<div style="position:absolute;top:${ITEM_H}px;left:0;right:0;height:${ITEM_H}px;border-top:1px solid #333;border-bottom:1px solid #333;pointer-events:none;z-index:2;"></div>
-				<div id="${id}" style="position:absolute;top:0;left:0;right:0;overflow-y:scroll;height:${ITEM_H * 3}px;scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;">
-					<div style="height:${ITEM_H}px;"></div>
-					${Array.from(
-						{ length: count },
-						(_, i) => `
-						<div style="height:${ITEM_H}px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;scroll-snap-align:center;color:#eee;">${String(i).padStart(2, '0')}</div>
-					`,
-					).join('')}
-					<div style="height:${ITEM_H}px;"></div>
-				</div>
-			</div>
-		</div>`;
-}
-
-function drumScrollTo(id, value) {
-	document.getElementById(id).scrollTop = value * ITEM_H;
-}
-
-function drumValue(id) {
-	return Math.round(document.getElementById(id).scrollTop / ITEM_H);
-}
-
-window.openTimePicker = function (pIdx, mIdx, currentSeconds) {
-	const h = Math.floor(currentSeconds / 3600);
-	const m = Math.floor((currentSeconds % 3600) / 60);
-	const s = currentSeconds % 60;
-
-	document.getElementById('modal-title').textContent = 'Set Duration';
-	document.getElementById('modal-content').innerHTML = `
-		<div style="display:flex;gap:12px;justify-content:center;margin:16px 0;">
-			${buildDrum('drum-h', 24, h, 'hrs')}
-			${buildDrum('drum-m', 60, m, 'min')}
-			${buildDrum('drum-s', 60, s, 'sec')}
-		</div>
-		<div style="display:flex;gap:10px;margin-top:16px;">
-			<button onclick="closeTimePicker()" style="flex:1;padding:12px;background:#333;color:#fff;border:none;border-radius:8px;">CANCEL</button>
-			<button onclick="saveTimePicker(${pIdx},${mIdx})" style="flex:1;padding:12px;background:var(--primary);color:#fff;border:none;border-radius:8px;">OK</button>
-		</div>
-	`;
-	document.getElementById('modal-overlay').style.display = 'flex';
-	requestAnimationFrame(() => {
-		drumScrollTo('drum-h', h);
-		drumScrollTo('drum-m', m);
-		drumScrollTo('drum-s', s);
-	});
-};
-
-window.closeTimePicker = function () {
-	document.getElementById('modal-overlay').style.display = 'none';
-};
-
-window.saveTimePicker = function (pIdx, mIdx) {
-	const h = drumValue('drum-h');
-	const m = drumValue('drum-m');
-	const s = drumValue('drum-s');
-	const totalSeconds = h * 3600 + m * 60 + s;
-	practices[pIdx].metronomes[mIdx].duration = Math.max(1, totalSeconds);
-	window.save();
-	render();
-	window.closeTimePicker();
-};
-
-// ---------------- Render ----------------
-
-function render() {
-	const app = document.getElementById('app');
-	app.innerHTML = '';
-	practices.forEach((p, pIdx) => {
-		const card = document.createElement('div');
-		card.className = 'practice';
-		card.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
-                    <input type="text" value="${p.name}" data-pidx="${pIdx}" class="practice-name-input" style="font-weight:900;border:none;background:transparent;color:var(--primary);width:60%">
-                    <div style="display:flex;gap:12px;align-items:center;">
-                        <span style="font-size:9px;font-weight:900;color:#444">LOOP</span>
-                        <input type="checkbox" ${p.loop ? 'checked' : ''} data-pidx="${pIdx}" class="practice-loop-input" style="width:16px;height:16px;">
-                        <button data-pidx="${pIdx}" class="delete-practice-btn" style="background:none;border:none;color:#555;font-size:16px;">🗑</button>
-                    </div>
-                </div>`;
-
-		card.querySelector('.practice-name-input').onchange = function () {
-			practices[pIdx].name = this.value;
-			window.save();
-		};
-		card.querySelector('.practice-loop-input').onchange = function () {
-			practices[pIdx].loop = this.checked;
-			window.save();
-		};
-		card.querySelector('.delete-practice-btn').onclick = () => openDeleteModal(pIdx);
-
-		p.metronomes.forEach((m, mIdx) => {
-			const mDiv = document.createElement('div');
-			mDiv.className = 'met';
-			mDiv.draggable = true;
-			mDiv.dataset.pidx = pIdx;
-			mDiv.dataset.midx = mIdx;
-
-			mDiv.addEventListener('dragstart', (e) => onDragStart(e, pIdx, mIdx));
-			mDiv.addEventListener('dragend', onDragEnd);
-			mDiv.addEventListener('dragover', (e) => onDragOver(e, pIdx, mIdx));
-			mDiv.addEventListener('drop', (e) => onDrop(e, pIdx, mIdx));
-
-			const rampActive = m.ramp ? 'active' : '';
-			const rampVisible = m.ramp ? 'visible' : '';
-
-			mDiv.innerHTML = `
-				<div class="met-name-row">
-					<span class="drag-handle" title="Drag to reorder">⠿</span>
-					<input class="met-name" type="text" value="${m.name}">
-					<button class="remove-met-btn" style="border:none;background:none;color:#444">✕</button>
-				</div>
-				<div class="met-row">
-					<span></span>
-					<input type="number" value="${m.startBPM}" min="20" max="300" step="1" placeholder="BPM" class="met-bpm-input">
-					<input type="text" value="${formatDuration(m.duration)}" readonly style="cursor:pointer;text-align:center;" class="met-duration-input">
-					<button class="ramp-toggle ${rampActive}">RAMP ${m.ramp ? 'ON' : 'OFF'}</button>
-				</div>
-				<div class="met-ramp-row ${rampVisible}" id="ramp-row-${pIdx}-${mIdx}">
-					<span>End BPM</span>
-					<input type="number" value="${m.endBPM || m.startBPM}" min="20" max="300" step="1" class="met-end-bpm-input">
-				</div>`;
-
-			mDiv.querySelector('.met-name').onchange = function () {
-				practices[pIdx].metronomes[mIdx].name = this.value;
-				window.save();
-			};
-			mDiv.querySelector('.met-name').onblur = function () {
-				this.classList.remove('unlocked');
-			};
-			mDiv.querySelector('.remove-met-btn').onclick = () => {
-				practices[pIdx].metronomes.splice(mIdx, 1);
-				window.save();
-				render();
-			};
-			mDiv.querySelector('.met-bpm-input').onchange = function () {
-				practices[pIdx].metronomes[mIdx].startBPM = parseInt(this.value);
-				window.save();
-			};
-			mDiv.querySelector('.met-duration-input').onclick = () => {
-				window.openTimePicker(pIdx, mIdx, m.duration);
-			};
-			mDiv.querySelector('.ramp-toggle').onclick = () => {
-				practices[pIdx].metronomes[mIdx].ramp = !practices[pIdx].metronomes[mIdx].ramp;
-				window.save();
-				render();
-			};
-			mDiv.querySelector('.met-end-bpm-input').onchange = function () {
-				practices[pIdx].metronomes[mIdx].endBPM = parseInt(this.value);
-				window.save();
-			};
-
-			const handle = mDiv.querySelector('.drag-handle');
-			handle.addEventListener('touchstart', (e) => onTouchDragStart(e, pIdx, mIdx), {
-				passive: false,
-			});
-
-			const nameInput = mDiv.querySelector('.met-name');
-			nameInput.addEventListener('click', (e) => {
-				e.stopPropagation();
-				toggleNameEdit(nameInput);
-			});
-
-			card.appendChild(mDiv);
-		});
-
-		const addSectionBtn = document.createElement('button');
-		addSectionBtn.textContent = '+ ADD SECTION';
-		addSectionBtn.style.cssText =
-			'width:100%;padding:10px;margin-top:10px;border-radius:12px;background:none;color:#555;border:1px dashed #333;font-weight:900;letter-spacing:1px;font-size:11px';
-		addSectionBtn.onclick = () => {
-			practices[pIdx].metronomes.push({
-				name: 'Exercise',
-				startBPM: 100,
-				duration: 60,
-				ramp: false,
-			});
-			window.save();
-			render();
-		};
-		card.appendChild(addSectionBtn);
-
-		const startBtn = document.createElement('button');
-		startBtn.textContent = 'START ROUTINE';
-		startBtn.style.cssText =
-			'width:100%;padding:14px;margin-top:10px;border-radius:12px;background:var(--primary);color:white;border:none;font-weight:900;letter-spacing:1px;font-size:12px';
-		startBtn.onclick = () => {
-			document.getElementById('builder').style.display = 'none';
-			document.getElementById('player').style.display = 'flex';
-			initAudio();
-			activePractice = p;
-			isPaused = false;
-			runSection(0);
-		};
-		card.appendChild(startBtn);
-		app.appendChild(card);
-	});
-
-	window.ontouchmove = onTouchDragMove;
-	window.ontouchend = onTouchDragEnd;
-}
-
-// ---------------- Knob controls ----------------
-
-let isDragging = false,
-	lastY = 0;
-document.getElementById('knobContainer').onmousedown = (e) => {
-	isDragging = true;
-	lastY = e.clientY;
-	initAudio();
-};
-window.onmousemove = (e) => {
-	if (isDragging) {
-		adjustBPM(lastY - e.clientY);
-		lastY = e.clientY;
-	}
-};
-window.onmouseup = () => (isDragging = false);
-
-document.getElementById('knobContainer').addEventListener(
-	'touchstart',
+window.addEventListener(
+	'touchmove',
 	(e) => {
-		isDragging = true;
-		lastY = e.touches[0].clientY;
-		initAudio();
+		if (!touchDrag) return;
+		const t = e.touches[0];
+		touchDrag.clone.style.top = t.clientY - 24 + 'px';
+		document.querySelectorAll('.sec').forEach((el) => el.classList.remove('is-drop-target'));
+		const target = document.elementFromPoint(t.clientX, t.clientY)?.closest('.sec');
+		if (target && target !== touchDrag.el) target.classList.add('is-drop-target');
 		e.preventDefault();
 	},
 	{ passive: false },
 );
-window.addEventListener(
-	'touchmove',
-	(e) => {
-		if (isDragging) {
-			adjustBPM(lastY - e.touches[0].clientY);
-			lastY = e.touches[0].clientY;
-			e.preventDefault();
-		}
-	},
-	{ passive: false },
-);
-window.addEventListener('touchend', () => (isDragging = false));
 
-// ---------------- Delete-routine modal ----------------
-
-let pendingDeleteIndex = null;
-
-function openDeleteModal(i) {
-	pendingDeleteIndex = i;
-	document.getElementById('modal-title').textContent = 'Delete Routine?';
-	document.getElementById('modal-content').innerHTML = `
-		<div style="display:flex; gap:10px; margin-top:20px;">
-			<button id="modal-cancel-btn" style="flex:1; padding:12px; background:#333; color:#fff; border:none; border-radius:8px;">CANCEL</button>
-			<button id="modal-confirm-btn" style="flex:1; padding:12px; background:#ff4444; color:#fff; border:none; border-radius:8px;">DELETE</button>
-		</div>
-	`;
-	document.getElementById('modal-cancel-btn').onclick = closeModal;
-	document.getElementById('modal-confirm-btn').onclick = confirmDelete;
-	document.getElementById('modal-overlay').style.display = 'flex';
-}
-
-function closeModal() {
-	document.getElementById('modal-overlay').style.display = 'none';
-}
-
-async function confirmDelete() {
-	const [removed] = practices.splice(pendingDeleteIndex, 1);
-	render();
-	closeModal();
-	if (removed?.id) {
-		try {
-			await withSync(deletePractice(removed.id));
-		} catch {
-			// withSync already alerted; nothing further to do
-		}
+window.addEventListener('touchend', (e) => {
+	if (!touchDrag) return;
+	const t = e.changedTouches[0];
+	const target = document.elementFromPoint(t.clientX, t.clientY)?.closest('.sec');
+	const { pIdx, mIdx, clone } = touchDrag;
+	clone.remove();
+	touchDrag = null;
+	clearDropMarks();
+	if (target && Number(target.dataset.pidx) === pIdx) {
+		moveSection(practices[pIdx], mIdx, Number(target.dataset.midx));
 	}
+});
+
+// ---------------- Builder render ----------------
+
+function formatDuration(seconds) {
+	const hh = Math.floor(seconds / 3600);
+	const m = Math.floor((seconds % 3600) / 60);
+	const s = seconds % 60;
+	if (hh > 0) return `${hh}h ${m}m ${s}s`;
+	if (m > 0) return s ? `${m}m ${s}s` : `${m}m`;
+	return `${s}s`;
+}
+
+function clampBPM(v, fallback) {
+	const n = parseInt(v, 10);
+	return Number.isFinite(n) ? Math.max(20, Math.min(300, n)) : fallback;
+}
+
+function renderSection(p, pIdx, m, mIdx) {
+	const st = sectionStats(m);
+	const li = h('li', {
+		class: `sec${m === currentTarget()?.section ? ' is-selected' : ''}`,
+		'data-pidx': pIdx,
+		'data-midx': mIdx,
+		onclick: () => selectSection(p, m),
+		onfocusin: () => selectSection(p, m),
+		ondragover: (e) => {
+			if (!dragFrom || dragFrom.pIdx !== pIdx) return;
+			e.preventDefault();
+			e.dataTransfer.dropEffect = 'move';
+			document.querySelectorAll('.sec').forEach((el) => el.classList.remove('is-drop-target'));
+			li.classList.add('is-drop-target');
+		},
+		ondrop: (e) => {
+			e.preventDefault();
+			if (dragFrom && dragFrom.pIdx === pIdx) moveSection(p, dragFrom.mIdx, mIdx);
+		},
+		ondragstart: (e) => {
+			dragFrom = { pIdx, mIdx };
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData('text/plain', m.name);
+			setTimeout(() => li.classList.add('is-dragging'), 0);
+		},
+		ondragend: () => {
+			dragFrom = null;
+			li.draggable = false;
+			clearDropMarks();
+		},
+	});
+	li._section = m;
+
+	const grip = h('button', {
+		class: 'grip',
+		type: 'button',
+		html: icons.grip,
+		'aria-label': `Move ${m.name}. Drag, or press arrow up or down.`,
+		// Only the grip starts a mouse drag, so inputs stay selectable.
+		onmousedown: () => (li.draggable = true),
+		onmouseup: () => (li.draggable = false),
+		onkeydown: (e) => {
+			if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+			e.preventDefault();
+			const to = mIdx + (e.key === 'ArrowUp' ? -1 : 1);
+			moveSection(p, mIdx, to);
+			document.querySelector(`.sec[data-pidx="${pIdx}"][data-midx="${Math.max(0, Math.min(to, p.metronomes.length - 1))}"] .grip`)?.focus();
+		},
+	});
+	grip.addEventListener('touchstart', (e) => onTouchDragStart(e, pIdx, mIdx), { passive: false });
+
+	const fields = h(
+		'div',
+		{ class: 'sec-fields' },
+		h(
+			'label',
+			{ class: 'mini' },
+			h('input', {
+				type: 'number',
+				min: '20',
+				max: '300',
+				step: '1',
+				inputmode: 'numeric',
+				value: String(m.startBPM),
+				'aria-label': `${m.name} tempo (BPM)`,
+				onchange: (e) => {
+					m.startBPM = clampBPM(e.target.value, m.startBPM);
+					e.target.value = m.startBPM;
+					savePractice(p);
+				},
+			}),
+			'BPM',
+		),
+		h(
+			'button',
+			{
+				class: 'duration-btn',
+				type: 'button',
+				'aria-label': `${m.name} length ${formatDuration(m.duration)}. Change`,
+				onclick: () => openTimePicker(p, m),
+			},
+			formatDuration(m.duration),
+		),
+		h(
+			'button',
+			{
+				class: 'ramp-btn',
+				type: 'button',
+				'aria-pressed': String(Boolean(m.ramp)),
+				onclick: () => {
+					m.ramp = !m.ramp;
+					if (m.ramp && !m.endBPM) m.endBPM = m.startBPM;
+					savePractice(p);
+					renderBuilder();
+				},
+			},
+			'Ramp',
+		),
+		m.ramp &&
+			h(
+				'label',
+				{ class: 'mini' },
+				'to',
+				h('input', {
+					type: 'number',
+					min: '20',
+					max: '300',
+					step: '1',
+					inputmode: 'numeric',
+					value: String(m.endBPM || m.startBPM),
+					'aria-label': `${m.name} end tempo (BPM)`,
+					onchange: (e) => {
+						m.endBPM = clampBPM(e.target.value, m.endBPM || m.startBPM);
+						e.target.value = m.endBPM;
+						savePractice(p);
+					},
+				}),
+				'BPM',
+			),
+	);
+
+	li.append(
+		grip,
+		h('input', {
+			class: 'sec-name',
+			type: 'text',
+			value: m.name,
+			'aria-label': 'Section name',
+			onchange: (e) => {
+				m.name = e.target.value.trim() || 'Section';
+				savePractice(p);
+			},
+		}),
+		tallyInline(st),
+		h('button', {
+			class: 'btn btn-quiet btn-icon sec-remove',
+			type: 'button',
+			html: icons.cross,
+			'aria-label': `Remove section ${m.name}`,
+			onclick: (e) => {
+				e.stopPropagation();
+				p.metronomes.splice(mIdx, 1);
+				savePractice(p);
+				renderBuilder();
+			},
+		}),
+		fields,
+	);
+	return li;
+}
+
+function renderRoutine(p, pIdx) {
+	const rt = routineStats(p);
+	const totalTime = p.metronomes.reduce((a, m) => a + (m.duration || 0), 0);
+	const loopSwitch = h(
+		'button',
+		{
+			class: 'switch',
+			type: 'button',
+			role: 'switch',
+			'aria-checked': String(Boolean(p.loop)),
+			onclick: () => {
+				p.loop = !p.loop;
+				loopSwitch.setAttribute('aria-checked', String(p.loop));
+				savePractice(p);
+			},
+		},
+		h('span', { class: 'switch-track', 'aria-hidden': 'true' }),
+		'Loop',
+	);
+
+	return h(
+		'article',
+		{ class: 'routine', 'aria-label': p.name },
+		h(
+			'div',
+			{ class: 'routine-head' },
+			h('input', {
+				class: 'routine-name',
+				type: 'text',
+				value: p.name,
+				'aria-label': 'Routine name',
+				onchange: (e) => {
+					p.name = e.target.value.trim() || 'Untitled routine';
+					savePractice(p);
+					renderRecordBar();
+				},
+			}),
+			h(
+				'div',
+				{ class: 'routine-tools' },
+				h('button', {
+					class: 'btn btn-quiet btn-icon',
+					type: 'button',
+					html: icons.reset,
+					title: 'Reset stats',
+					'aria-label': `Reset stats for ${p.name}`,
+					disabled: rt.s + rt.f === 0,
+					onclick: () =>
+						confirmDialog({
+							title: 'Reset routine stats?',
+							text: `Clears ✓ ${rt.s} / ✗ ${rt.f} from every section of “${p.name}”. Your all-time total is kept.`,
+							confirm: 'Reset',
+							onConfirm: () => {
+								p.metronomes.forEach((m) => (m.stats = { s: 0, f: 0 }));
+								recorder.clear();
+								savePractice(p);
+								renderBuilder();
+							},
+						}),
+				}),
+				h('button', {
+					class: 'btn btn-quiet btn-icon',
+					type: 'button',
+					html: icons.trash,
+					title: 'Delete routine',
+					'aria-label': `Delete routine ${p.name}`,
+					onclick: () => openDeleteDialog(p),
+				}),
+			),
+			h(
+				'div',
+				{ class: 'routine-meta' },
+				tallyInline(rt),
+				h('span', {}, `${p.metronomes.length} ${p.metronomes.length === 1 ? 'section' : 'sections'} · ${formatDuration(totalTime)}`),
+				loopSwitch,
+			),
+		),
+		h('ol', { class: 'sections' }, p.metronomes.map((m, mIdx) => renderSection(p, pIdx, m, mIdx))),
+		h(
+			'div',
+			{ class: 'routine-actions' },
+			h(
+				'button',
+				{
+					class: 'btn add',
+					type: 'button',
+					onclick: () => {
+						const last = p.metronomes[p.metronomes.length - 1];
+						const section = {
+							name: `Exercise ${p.metronomes.length + 1}`,
+							startBPM: last?.startBPM ?? 100,
+							duration: last?.duration ?? 60,
+							ramp: false,
+						};
+						p.metronomes.push(section);
+						selectSection(p, section);
+						savePractice(p);
+						renderBuilder();
+					},
+				},
+				iconEl('plus'),
+				'Add section',
+			),
+			h(
+				'button',
+				{
+					class: 'btn btn-primary start',
+					type: 'button',
+					disabled: !p.metronomes.length,
+					onclick: () => startRoutine(p),
+				},
+				iconEl('play'),
+				'Start routine',
+			),
+		),
+	);
+}
+
+function renderRecordBar() {
+	const t = currentTarget();
+	const label = $('record-target');
+	if (!t) label.replaceChildren('No routine yet', h('b', {}, 'Records count toward all-time'));
+	else
+		label.replaceChildren(
+			'Pedal records to',
+			h('b', {}, t.section ? `${t.practice.name} › ${t.section.name}` : t.practice.name),
+		);
+	$('bar-undo').disabled = recorder.size === 0;
+}
+
+function renderBuilder({ keepFocus = false } = {}) {
+	// Re-rendering replaces the controls; remember which one had focus
+	// (by section position + class) so the pedal/keyboard user keeps their place.
+	const active = keepFocus ? document.activeElement : null;
+	const sec = active?.closest?.('#app .sec');
+	const focusSelector =
+		sec && active.classList[0]
+			? `.sec[data-pidx="${sec.dataset.pidx}"][data-midx="${sec.dataset.midx}"] .${active.classList[0]}`
+			: null;
+
+	renderAlltime();
+	const app = $('app');
+	if (!practices.length) {
+		app.replaceChildren(
+			h(
+				'div',
+				{ class: 'empty' },
+				h('p', {}, 'No routines yet. A routine is a list of timed sections, each with its own tempo.'),
+				h('button', { class: 'btn btn-primary', type: 'button', onclick: addRoutine }, 'Create your first routine'),
+			),
+		);
+	} else {
+		app.replaceChildren(...practices.map((p, pIdx) => renderRoutine(p, pIdx)));
+	}
+	renderRecordBar();
+	if (focusSelector) document.querySelector(focusSelector)?.focus();
+}
+
+// ---------------- Delete routine ----------------
+
+function openDeleteDialog(p) {
+	confirmDialog({
+		title: 'Delete routine?',
+		text: `“${p.name}” and its per-section stats will be deleted. Your all-time total is kept.`,
+		confirm: 'Delete',
+		onConfirm: async () => {
+			const idx = practices.indexOf(p);
+			if (idx >= 0) practices.splice(idx, 1);
+			dirtyPractices.delete(p.id);
+			if (selectedPracticeId === p.id) restoreSelection();
+			renderBuilder();
+			if (p.id) await withSync(deletePractice(p.id)).catch(() => {});
+		},
+	});
 }
 
 // ---------------- Top-level buttons ----------------
 
-document.getElementById('addPracticeBtn').onclick = async () => {
+async function addRoutine() {
 	const draft = {
-		name: 'New Routine',
+		name: 'New routine',
 		loop: false,
 		metronomes: [{ name: 'Exercise 1', startBPM: 100, duration: 60, ramp: false }],
 		position: practices.length,
 	};
 	try {
 		const created = await withSync(insertPractice(draft));
-		practices.push(created);
-		render();
+		practices.push({ ...created, metronomes: created.metronomes ?? [] });
+		const p = practices[practices.length - 1];
+		selectSection(p, p.metronomes[0]);
+		renderBuilder();
+		document.querySelector('.routine:last-of-type .routine-name')?.select();
 	} catch {
-		// withSync already alerted
+		// withSync already reported it
 	}
-};
+}
 
-document.getElementById('playPause').onclick = () => {
-	isPaused = !isPaused;
-	document.getElementById('playPause').textContent = isPaused ? '▶' : 'II';
-};
-document.getElementById('plus').onclick = () => adjustBPM(1);
-document.getElementById('minus').onclick = () => adjustBPM(-1);
-document.getElementById('stop').onclick = stopEverything;
-document.getElementById('nextBtn').onclick = () => runSection(activeMetIndex + 1);
-document.getElementById('prevBtn').onclick = () => runSection(activeMetIndex - 1);
+$('addPracticeBtn').onclick = addRoutine;
+
+// Static icons in the markup.
+$('bar-good').innerHTML = icons.check;
+$('bar-bad').innerHTML = icons.cross;
+$('bar-undo').innerHTML = icons.undo;
+$('stop').replaceChildren(iconEl('back'), 'Exit');
+$('undoBtn').replaceChildren(iconEl('undo'), 'Undo');
+$('minus').innerHTML = icons.minus;
+$('plus').innerHTML = icons.plus;
+$('prevBtn').innerHTML = icons.prev;
+$('nextBtn').innerHTML = icons.next;
+document.querySelector('.ico-good').outerHTML = icons.check;
+document.querySelector('.ico-bad').outerHTML = icons.cross;
+renderPlayButton();
 
 init();
