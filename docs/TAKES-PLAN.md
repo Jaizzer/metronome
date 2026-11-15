@@ -5,6 +5,7 @@ Status: planned, not built. Owner approved the design; build starts on "go".
 ## What the player does
 - Toggle **Record takes** in the player. Each section records on its own while it plays (click included, so timing is audible). Pause pauses the take; section end / skip / Exit saves it. Takes under 3 s are dropped.
 - **● REC** chip in amber (red means ✗ in this app).
+- **✓/✗ marks inside the take** (added 2026-11-15): every ✓/✗ recorded during a take is stored with its time offset (`marks: [{ t, kind }]`). Playback shows them as ✓/✗ ticks on the seek bar; tap a tick to jump 3 s before it. Counting still works exactly as today.
 - Section rows: **Takes (n)** → dialog: play/pause, seek, time, prev/next take, 0.75×/1×, ⭐ keep, delete, Save/Share.
 
 ## Audio
@@ -18,7 +19,7 @@ iPad / phone (app)  ──HTTPS over Tailscale──>  Mac: Node server (launchd
   IndexedDB copy + outbox                         ├─ ~/MetronomeTakes/                       every take
                                                   └─ iCloud Drive/Metronome Keepers/          ⭐ takes (macOS syncs)
 ```
-- Take record: `{ id, userId, routineId, sectionId, section, bpm, recordedAt, durationMs, mime, starred, sha256, audio }`.
+- Take record: `{ id, userId, routineId, sectionId, section, bpm, recordedAt, durationMs, mime, starred, sha256, marks, audio }`.
 - **Outbox** (pending → uploading → done). Retries on: app open, `visibilitychange`, `online`, every 60 s while open, after each take, **Sync now**. `GET /health` first.
 - **Resumable uploads**: 512 KB chunks; `HEAD /takes/:id` returns the received offset; resume from there. Take id makes retries idempotent. The device copy is deleted only after the server confirms the sha256.
 - Status chip: `Mac ● online` / `Mac ○ offline · n takes waiting`.
