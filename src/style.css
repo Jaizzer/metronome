@@ -995,12 +995,16 @@ input[type='number']::-webkit-outer-spin-button {
 .song-line {
 	margin: var(--s1) 0 0;
 	max-width: 520px;
-	font-size: 18px;
+	font-size: clamp(22px, 6vw, 24px);
 	font-weight: 600;
 	line-height: 1.35;
 	color: var(--paper);
 	text-wrap: balance;
 	font-variant-numeric: tabular-nums;
+}
+
+.song-line span {
+	white-space: nowrap;
 }
 
 .time {
@@ -1683,6 +1687,10 @@ dialog p {
 .song-sum {
 	margin: 0;
 	flex: 1 1 220px;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
 	font-size: 14px;
 	color: var(--paper-2);
 	font-variant-numeric: tabular-nums;
@@ -1737,6 +1745,10 @@ dialog p {
 
 .sec-song p {
 	margin: 0 0 var(--s1);
+}
+
+.sec-kind {
+	margin: var(--s1) 0 var(--s2);
 }
 
 /* ---------- Phones ---------- */

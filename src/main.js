@@ -36,14 +36,14 @@ import {
 	newAttemptId,
 	mergeLog,
 	songState,
-	ladder,
-	shouldJoin,
+	nextStep,
 	chunkStatus,
 	sessionStart,
 	ownedTempo,
-	band,
 	streak,
 	dayKey,
+	coldDoneToday,
+	coldThreshold,
 } from './engine.js';
 
 const $ = (id) => document.getElementById(id);
@@ -413,6 +413,7 @@ async function refreshFromServer() {
 				return p;
 			});
 			showTotals({ s: t?.success ?? 0, f: t?.fail ?? 0 });
+			prepareAllSongSessions();
 			if (!practices.some((p) => p.id === selectedPracticeId)) restoreSelection();
 			refreshViews();
 		} catch (e) {
@@ -667,6 +668,7 @@ async function bootApp(session) {
 			p.metronomes = reconcileSections(p.metronomes, p.metronomes.map((m) => ({ ...m })), sync.pendingFor(p.id), true);
 		}
 		showTotals({ s: masteryCounts.success, f: masteryCounts.fail });
+		prepareAllSongSessions();
 		scheduleCountFlushes();
 		showStats = settings.show_stats;
 		metVolume = parseFloat(settings.volume);
@@ -750,9 +752,10 @@ function currentTarget() {
 
 // ---------------- Song mode (docs/PRACTICE-ALGORITHM.md, src/engine.js) ----------------
 // Routine settings are mirrored on every section as `song: { on, target }`
-// (the row has no other place for them); read from the first section.
+// (the row has no other place for them); read from the first section that
+// has them, written to all.
 
-const songOf = (p) => p?.metronomes?.[0]?.song ?? null;
+const songOf = (p) => p?.metronomes?.find((m) => m.song)?.song ?? null;
 const isSong = (p) => Boolean(songOf(p)?.on);
 const songTarget = (p) => songOf(p)?.target ?? null;
 const isRun = (m) => (m?.kind ?? 'chunk') === 'run';
@@ -785,14 +788,19 @@ function cueTone(dir) {
 }
 
 // After an attempt on a chunk: climb/drop the tempo, prompt a shrink, join
-// the song. Returns a toast message or null. Undo doesn't revert these.
+// the song (engine.nextStep decides). Returns a toast message or null.
+// Undo doesn't revert these.
+const STEP_MSG = {
+	up: (to) => `↑ ${to} BPM · 2 ✓ in a row`,
+	down: (to) => `↓ ${to} BPM · 4 ✗ in a row`,
+	'cold-miss': (to) => `↓ ${to} BPM · missed the daily check`,
+};
+
 function afterAttempt(p, m, attempt) {
-	if (isRun(m)) return null;
-	const song = songNow(p);
-	const r = ladder(m.log ?? [], attempt.bpm, m.joined ? song.cap : song.ceiling);
+	const r = nextStep(m, p.metronomes, songTarget(p), attempt);
 	const msgs = [];
 	let changed = false;
-	if (r.action === 'up' || r.action === 'down') {
+	if (STEP_MSG[r.action]) {
 		m.startBPM = r.to;
 		changed = true;
 		if (playingSection() === m) {
@@ -800,12 +808,12 @@ function afterAttempt(p, m, attempt) {
 			isRamping = false;
 			adjustBPMDisplay();
 		}
-		cueTone(r.action);
-		msgs.push(r.action === 'up' ? `↑ ${r.to} BPM · 2 ✓ in a row` : `↓ ${r.to} BPM · 4 ✗ in a row`);
+		cueTone(r.action === 'up' ? 'up' : 'down');
+		msgs.push(STEP_MSG[r.action](r.to));
 	} else if (r.action === 'shrink') {
 		msgs.push('2 ✗ in a row · try half the chunk');
 	}
-	if (shouldJoin(m, song)) {
+	if (r.join) {
 		m.joined = true;
 		changed = true;
 		msgs.push(`Joined the song at ${ownedTempo(m.log ?? [])} BPM`);
@@ -814,17 +822,23 @@ function afterAttempt(p, m, attempt) {
 	return msgs.length ? msgs.join(' · ') : null;
 }
 
-// A new day: chunks with an owned tempo start there (capped), so the first
-// (cold) attempt of the day tests what was learned.
+// A new day: each practised chunk starts at its probe tempo (yesterday's top
+// ✓, capped) so the builder shows the tempo the player will use and the
+// day's first attempt is the cold check. Once per section per day (per tab),
+// and never after it was played today, so a manual change sticks.
+const sessionPrepared = new Set();
+
 function prepareSongSession(p) {
-	if (!isSong(p)) return;
+	if (!isSong(p) || p === activePractice) return false;
 	const song = songNow(p);
 	const today = dayKey(Date.now());
 	let changed = false;
 	for (const m of p.metronomes) {
-		if (isRun(m)) continue;
+		const key = `${p.id}:${m.id}:${today}`;
+		if (isRun(m) || sessionPrepared.has(key)) continue;
+		sessionPrepared.add(key);
 		const log = m.log ?? [];
-		if (ownedTempo(log) === null || log.some((a) => dayKey(a.t) === today)) continue;
+		if (!log.length || log.some((a) => dayKey(a.t) === today)) continue;
 		const start = sessionStart(m, song);
 		if (start !== m.startBPM) {
 			m.startBPM = start;
@@ -832,7 +846,19 @@ function prepareSongSession(p) {
 		}
 	}
 	if (changed) savePractice(p);
+	return changed;
 }
+
+function prepareAllSongSessions() {
+	let changed = false;
+	for (const p of practices) if (prepareSongSession(p)) changed = true;
+	return changed;
+}
+
+// The day can change while the app stays open.
+setInterval(() => {
+	if (currentSession && !booting && prepareAllSongSessions()) refreshViews();
+}, 60 * 1000);
 
 // ---------------- Recording ✓ / ✗ ----------------
 
@@ -1298,21 +1324,19 @@ function updateTally() {
 function songLineText(p, m) {
 	if (isRun(m)) return 'Run · tap ✗ and keep playing';
 	const log = m.log ?? [];
-	const today = dayKey(Date.now());
-	if (!log.some((a) => dayKey(a.t) === today)) return 'Cold attempt · first try today counts';
+	if (!coldDoneToday(log)) {
+		const min = coldThreshold(log);
+		return min !== null && currentBPM < min
+			? `Warm-up · daily check from ${min} BPM`
+			: 'First try today · this is your daily check';
+	}
 	const song = songNow(p);
 	const cap = m.joined ? song.cap : song.ceiling;
+	if (currentBPM >= cap) return `Work · at the cap (${cap} BPM)`;
 	const st = streak(log, currentBPM);
-	let step;
-	if (st.kind === 's' && currentBPM >= cap) step = `At the cap · ${cap}`;
-	else if (st.kind === 's') step = `✓ ${st.n} of 2 to go up`;
-	else if (st.kind === 'f') step = `✗ ${st.n} in a row`;
-	else step = '2 ✓ in a row to go up';
-	const b = band(log);
-	const owned = ownedTempo(log);
-	return ['Work', step, b === null ? null : `Band ${Math.round(b * 100)}%`, owned === null ? null : `Owned ${owned}`]
-		.filter(Boolean)
-		.join(' · ');
+	if (st.kind === 's') return `Work · ${Math.max(1, 2 - st.n)} more ✓ to go up`;
+	if (st.kind === 'f') return `Work · ✗ ${st.n} in a row`;
+	return 'Work · 2 ✓ in a row to go up';
 }
 
 function updateSongLine() {
@@ -1320,7 +1344,11 @@ function updateSongLine() {
 	const m = playingSection();
 	const on = Boolean(m && isSong(activePractice));
 	el.hidden = !on;
-	if (on) el.textContent = songLineText(activePractice, m);
+	// Each phrase stays whole; the line only wraps at a "·".
+	if (on) {
+		const parts = songLineText(activePractice, m).split(' · ');
+		el.replaceChildren(...parts.flatMap((t, i) => [i ? ' · ' : '', h('span', {}, t)]));
+	}
 }
 
 // Keep the phone screen awake while a routine plays (music-stand use).
@@ -1619,6 +1647,31 @@ function songStatusEl(p, m, song) {
 			[bandText, review, `${cs.attempts} ${cs.attempts === 1 ? 'attempt' : 'attempts'}`].filter(Boolean).join(' · '),
 		),
 		cs.plateau && cs.state !== 'run' && h('p', {}, 'Plateau · film your hands, check tension'),
+		h(
+			'div',
+			{ class: 'seg sec-kind', role: 'group', 'aria-label': `${m.name}: chunk or run` },
+			[
+				['chunk', 'Chunk', 'Work on it: stop at a ✗; the tempo climbs'],
+				['run', 'Run', 'Play-through: tap ✗ and keep playing; the tempo stays'],
+			].map(([kind, label, title]) =>
+				h(
+					'button',
+					{
+						class: 'seg-btn',
+						type: 'button',
+						title,
+						'aria-pressed': String((m.kind ?? 'chunk') === kind),
+						onclick: () => {
+							if ((m.kind ?? 'chunk') === kind) return;
+							m.kind = kind;
+							savePractice(p);
+							renderBuilder({ keepFocus: true });
+						},
+					},
+					label,
+				),
+			),
+		),
 	);
 }
 
@@ -1706,23 +1759,6 @@ function renderSection(p, pIdx, m, mIdx, song = null) {
 			iconEl('clock'),
 			formatDuration(m.duration),
 		),
-		song &&
-			h(
-				'button',
-				{
-					class: 'ramp-btn',
-					type: 'button',
-					'aria-pressed': String(isRun(m)),
-					title: 'Run: a play-through. Tap ✗ and keep playing; no tempo changes.',
-					onclick: () => {
-						m.kind = isRun(m) ? 'chunk' : 'run';
-						savePractice(p);
-						renderBuilder();
-					},
-				},
-				iconEl('run'),
-				'Run',
-			),
 		!song &&
 		h(
 			'button',
@@ -1808,16 +1844,20 @@ function renderSection(p, pIdx, m, mIdx, song = null) {
 // Target BPM and one summary line for a song-mode routine.
 function songBar(p, song) {
 	const target = songTarget(p);
-	const due = p.metronomes.filter((m) => chunkStatus(m, song).due).length;
+	const due = p.metronomes.filter((m) => chunkStatus(m, song).due).map((m) => m.name);
+	const dueText = due.length
+		? `Due today: ${due.slice(0, 2).join(', ')}${due.length > 2 ? ` +${due.length - 2}` : ''}`
+		: null;
+	// One line: song tempo first, then what's due; the bottleneck (also
+	// marked on its section) goes last, where truncation costs least.
 	const parts =
 		song.tempo === null
-			? ['Song tempo: not set yet · own a chunk on 2 days']
+			? ['Song tempo: not set yet · own a chunk on 2 days', dueText]
 			: [
-					`Song tempo ${song.tempo}`,
-					song.pct !== null ? `${song.pct}% of ${target}` : null,
+					song.pct !== null ? `Song tempo ${song.tempo} (${song.pct}%)` : `Song tempo ${song.tempo}`,
+					dueText,
 					song.bottleneck ? `Bottleneck: ${song.bottleneck.name}` : null,
 				];
-	if (due) parts.push(`Due today:\u00a0${due}`);
 	return h(
 		'div',
 		{ class: 'song-bar' },
@@ -1842,7 +1882,7 @@ function songBar(p, song) {
 			}),
 			'BPM',
 		),
-		h('p', { class: 'song-sum' }, parts.filter(Boolean).join(' · ')),
+		h('p', { class: 'song-sum', title: parts.filter(Boolean).join(' · ') }, parts.filter(Boolean).join(' · ')),
 	);
 }
 
