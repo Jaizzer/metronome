@@ -83,7 +83,7 @@ The old GitHub Pages site serves the unbuilt source and doesn't work; use the Ve
 
 ## Third-party: alphaTab
 
-Tab reading, drawing and playback use [alphaTab](https://alphatab.net) 1.9.0 (MPL-2.0; its source and licence ship in `node_modules/@coderline/alphatab`), loaded only when the import screen or a Tab view needs it, in its own chunk. Its rendered "♪ alphaTab.net" attribution stays visible as its terms require. It bundles the Bravura font (SIL OFL 1.1) and the SONiVOX soundfont used by Hear it. `@coderline/alphatab-vite` wires its worker into the build (it needs Vite 6+).
+Tab reading, drawing and playback use [alphaTab](https://alphatab.net) 1.9.0 (MPL-2.0; its source and licence ship in `node_modules/@coderline/alphatab`), loaded only when the import screen or a Tab view needs it, in its own chunk. Its code is MPL-2.0. Separately, alphaTab's notice asks that the "♪ alphaTab.net" credit it draws in longer scores stays visible (hiding it needs the maintainers' permission, see https://alphatab.net/docs/attribution); the app never hides it. It bundles the Bravura font (SIL OFL 1.1) and the SONiVOX soundfont used by Hear it. `@coderline/alphatab-vite` wires its worker into the build (it needs Vite 6+).
 
 ## Files
 

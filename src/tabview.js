@@ -3,8 +3,9 @@
 // reading Guitar Pro / MusicXML files, drawing a bar range as tab, and
 // playing it with alphaTab's synth. main.js only loads this file with a
 // dynamic import (tab import or a Tab view), so alphaTab stays out of
-// the main bundle. alphaTab's "♪ alphaTab.net" attribution in the drawn
-// tab is part of its licence terms and stays visible.
+// the main bundle. alphaTab's own notice (separate from its MPL-2.0
+// licence) asks that the "♪ alphaTab.net" credit it draws stays visible;
+// hiding it needs the maintainers' permission. We never hide it.
 // ============================================================
 import * as alphaTab from '@coderline/alphatab';
 import bravuraWoff2 from '@coderline/alphatab/font/Bravura.woff2?url';
