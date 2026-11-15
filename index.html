@@ -64,22 +64,20 @@
 		<div class="builder-inner">
 			<div class="builder-head">
 				<h1>Routines</h1>
-				<button id="addPracticeBtn" class="btn btn-primary" type="button">New routine</button>
-			</div>
-			<p id="alltime" class="alltime"></p>
-			<div class="view-bar">
 				<div class="seg" role="group" aria-label="Routine layout">
 					<button id="view-list" class="seg-btn" type="button" aria-pressed="true">List</button>
 					<button id="view-slide" class="seg-btn" type="button" aria-pressed="false">Slide</button>
 				</div>
-				<div id="pager" class="pager" hidden>
-					<button id="slide-prev" class="btn btn-quiet btn-icon" type="button" aria-label="Previous routine"></button>
-					<span id="slide-pos" class="slide-pos" aria-live="polite"></span>
-					<button id="slide-next" class="btn btn-quiet btn-icon" type="button" aria-label="Next routine"></button>
-				</div>
+			</div>
+			<p id="alltime" class="alltime"></p>
+			<div id="pager" class="pager" hidden>
+				<button id="slide-prev" class="btn btn-quiet btn-icon" type="button" aria-label="Previous routine"></button>
+				<span id="slide-pos" class="slide-pos" aria-live="polite"></span>
+				<button id="slide-next" class="btn btn-quiet btn-icon" type="button" aria-label="Next routine"></button>
 			</div>
 			<div id="app"></div>
 			<div id="slide-dots" class="slide-dots" hidden></div>
+			<button id="addPracticeBtn" class="btn btn-quiet add-routine" type="button">New routine</button>
 		</div>
 		<div class="record-bar" role="region" aria-label="Record a run">
 			<div class="record-bar-inner">
@@ -134,36 +132,39 @@
 			</div>
 
 			<div class="tally">
-				<div class="tally-head">
-					<span id="pedal-pending" class="pending" hidden>Pending… tap again for ✗</span>
-					<span id="pedal-hint" class="pedal-hint">Pedal: tap ✓ · double ✗ · hold undo</span>
-					<button id="undoBtn" class="btn btn-quiet" type="button"></button>
-				</div>
 				<div id="stats-ui" class="panels">
 					<button id="success-zone" class="panel panel-good" type="button">
 						<span class="panel-label"><span class="ico-good"></span>Good</span>
 						<span id="success-count" class="panel-count">0</span>
-						<span id="success-sub" class="panel-sub"></span>
 					</button>
 					<button id="fail-zone" class="panel panel-bad" type="button">
 						<span class="panel-label"><span class="ico-bad"></span>Bad</span>
 						<span id="fail-count" class="panel-count">0</span>
-						<span id="fail-sub" class="panel-sub"></span>
 					</button>
 				</div>
-				<p id="tally-foot" class="tally-foot"></p>
+				<div class="tally-row">
+					<p id="tally-foot" class="tally-foot"></p>
+					<span id="pedal-pending" class="pending" hidden>Pending… tap again for ✗</span>
+					<button id="undoBtn" class="btn btn-quiet" type="button"></button>
+				</div>
 			</div>
 
-			<div class="player-settings">
-				<label class="volume" for="volumeSlider">Volume
-					<input type="range" id="volumeSlider" min="0" max="3" step="0.01" value="0.8">
-					<output id="volume-pct" for="volumeSlider">27%</output>
-				</label>
-				<button id="toggleStats" class="switch" type="button" role="switch" aria-checked="true">
-					<span class="switch-track" aria-hidden="true"></span>Show stats
-				</button>
-				<button id="resetStats" class="btn btn-quiet" type="button">Reset all-time</button>
-			</div>
+			<details id="player-more" class="player-more">
+				<summary id="player-more-summary">Settings</summary>
+				<div class="player-settings">
+					<label class="volume" for="volumeSlider">Volume
+						<input type="range" id="volumeSlider" min="0" max="3" step="0.01" value="0.8">
+						<output id="volume-pct" for="volumeSlider">27%</output>
+					</label>
+					<button id="toggleStats" class="switch" type="button" role="switch" aria-checked="true">
+						<span class="switch-track" aria-hidden="true"></span>Show stats
+					</button>
+					<p class="alltime-row"><span id="player-alltime"></span>
+						<button id="resetStats" class="btn btn-quiet" type="button">Reset all-time</button>
+					</p>
+					<p id="pedal-hint" class="pedal-hint">Pedal: tap ✓ · double-tap ✗ · hold to undo</p>
+				</div>
+			</details>
 		</div>
 	</section>
 

@@ -956,7 +956,6 @@ const pedal = createPedal({
 			const el = $(id);
 			el.hidden = !on; // un-hiding restarts the shrinking dot that times the window
 		}
-		$('pedal-hint').hidden = on;
 	},
 });
 
@@ -1004,7 +1003,7 @@ window.addEventListener('keydown', (e) => {
 	}
 	if (view !== 'player') return;
 	const onRange = e.target?.type === 'range';
-	if (e.key === ' ' && !(e.target instanceof HTMLButtonElement) && !onRange) {
+	if (e.key === ' ' && !(e.target instanceof HTMLButtonElement) && !e.target?.closest?.('summary') && !onRange) {
 		e.preventDefault();
 		if (!e.repeat) togglePause();
 	} else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !onRange) {
@@ -1056,25 +1055,23 @@ function tallyInline(st) {
 	);
 }
 
-// A thin ✓/✗ share bar; the counts in text sit beside it.
-function shareBar(st) {
-	const n = st.s + st.f;
-	const bar = h('div', { class: 'share', 'aria-hidden': 'true' });
-	if (!n) bar.classList.add('is-empty');
-	else bar.append(h('span', { class: 'share-g', style: `flex-grow:${st.s}` }), h('span', { class: 'share-b', style: `flex-grow:${st.f}` }));
-	return bar;
-}
-
+// All-time ✓/✗: one quiet line under the builder heading, and beside
+// "Reset all-time" in the player's settings.
 function renderAlltime() {
-	$('alltime').replaceChildren(
-		h('span', { class: 'alltime-label' }, iconEl('target'), 'All-time'),
-		h('b', {}, `✓ ${totals.s}`),
-		h('b', {}, `✗ ${totals.f}`),
-		h('span', {}, 'accuracy ', h('b', {}, formatAccuracy(totals))),
-	);
+	const line = () => [
+		'All-time ',
+		h('b', { class: 'g' }, `✓ ${totals.s}`),
+		' ',
+		h('b', { class: 'b' }, `✗ ${totals.f}`),
+		' · ',
+		h('b', {}, formatAccuracy(totals)),
+	];
+	$('alltime').replaceChildren(...line());
+	$('player-alltime').replaceChildren(...line());
 }
 
 function refreshStats() {
+	renderAlltime();
 	if (view === 'player') updateTally();
 	else renderBuilder({ keepFocus: true });
 }
@@ -1309,12 +1306,9 @@ function updateTally() {
 	const rt = routineStats(activePractice);
 	$('success-count').textContent = sec.s;
 	$('fail-count').textContent = sec.f;
-	$('success-sub').textContent = `Section · routine ${rt.s}`;
-	$('fail-sub').textContent = `Section · routine ${rt.f}`;
 	$('tally-foot').replaceChildren(
 		h('span', {}, 'Section ', h('b', {}, formatAccuracy(sec))),
 		h('span', {}, 'Routine ', h('b', {}, formatAccuracy(rt))),
-		h('span', {}, 'All-time ', h('b', {}, `${formatAccuracy(totals)} of ${totals.s + totals.f}`)),
 	);
 	$('undoBtn').disabled = !canUndo();
 	updateSongLine();
@@ -1613,8 +1607,10 @@ function clampBPM(v, fallback) {
 	return Number.isFinite(n) ? Math.max(20, Math.min(300, n)) : fallback;
 }
 
-// Song mode details the owner opened stay open across re-renders.
-const openSongDetails = new Set();
+// Progressive disclosure: one section is open for editing at a time, and
+// each routine's options open on demand; both survive re-renders.
+let openSectionId = null;
+const openOptions = new Set();
 
 const STATE_LABEL = { new: '○ New', joined: '● Joined', bottleneck: '▼ Bottleneck', run: '→ Run' };
 
@@ -1623,31 +1619,23 @@ function shortDate(key) {
 	return new Date(y, mo - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-// One short line per section; band, next review and plateau advice are
-// behind the disclosure (plateau and due-today also show on the line).
-function songStatusEl(p, m, song) {
-	const cs = chunkStatus(m, song);
-	const bandText = cs.band === null ? 'Band –' : `Band ${Math.round(cs.band * 100)}%`;
-	const line = [STATE_LABEL[cs.state]];
-	if (cs.state !== 'run') line.push(cs.owned === null ? 'Owned –' : `Owned ${cs.owned}`);
-	else line.push(`${cs.attempts} ${cs.attempts === 1 ? 'attempt' : 'attempts'}`);
-	if (cs.due) line.push('Due today');
-	if (cs.plateau && cs.state !== 'run') line.push('Plateau');
+// The short status on a song section's row: its state, plus "Due today".
+const songRowStatus = (cs) => [STATE_LABEL[cs.state], cs.due && 'Due today'].filter(Boolean).join(' · ');
+
+// Inside an open song section: owned tempo, band, next review, attempts,
+// plateau advice, and the Chunk | Run choice.
+function songDetailsEl(p, m, cs) {
+	const facts = [];
+	if (cs.state !== 'run') facts.push(cs.owned === null ? 'Owned –' : `Owned ${cs.owned} BPM`);
+	facts.push(cs.band === null ? 'Band –' : `Band ${Math.round(cs.band * 100)}%`);
 	const review = cs.state === 'run' || cs.due ? null : cs.review ? `Next review ${shortDate(cs.review)}` : 'Review starts once owned';
+	if (review) facts.push(review);
+	facts.push(`${cs.attempts} ${cs.attempts === 1 ? 'attempt' : 'attempts'}`);
 	return h(
-		'details',
-		{
-			class: 'sec-song',
-			open: openSongDetails.has(m.id),
-			ontoggle: (e) => (e.target.open ? openSongDetails.add(m.id) : openSongDetails.delete(m.id)),
-		},
-		h('summary', {}, line.join(' · ')),
-		h(
-			'p',
-			{},
-			[bandText, review, `${cs.attempts} ${cs.attempts === 1 ? 'attempt' : 'attempts'}`].filter(Boolean).join(' · '),
-		),
-		cs.plateau && cs.state !== 'run' && h('p', {}, 'Plateau · film your hands, check tension'),
+		'div',
+		{ class: 'sec-song' },
+		h('p', {}, facts.join(' · ')),
+		cs.plateau && cs.state !== 'run' && h('p', { class: 'sec-advice' }, 'Plateau · film your hands, check tension'),
 		h(
 			'div',
 			{ class: 'seg sec-kind', role: 'group', 'aria-label': `${m.name}: chunk or run` },
@@ -1676,10 +1664,36 @@ function songStatusEl(p, m, song) {
 	);
 }
 
+function setSectionOpen(li, open) {
+	li.classList.toggle('is-open', open);
+	li.querySelector('.sec-open').setAttribute('aria-expanded', String(open));
+	li.querySelector('.sec-panel').hidden = !open;
+}
+
+function toggleSection(li, m) {
+	const open = openSectionId !== m.id;
+	document.querySelectorAll('#app .sec.is-open').forEach((el) => setSectionOpen(el, false));
+	openSectionId = open ? m.id : null;
+	if (open) setSectionOpen(li, true);
+}
+
+const tempoLabel = (m, song) =>
+	!song && m.ramp && m.endBPM && m.endBPM !== m.startBPM ? `${m.startBPM}→${m.endBPM}` : String(m.startBPM);
+
+function bpmInput(props) {
+	return h('input', { type: 'number', min: '20', max: '300', step: '1', inputmode: 'numeric', ...props });
+}
+
+// A section is one calm row (name, tempo, length, song status); tapping it
+// opens its editing panel (name, tempo, ramp, length, ✓/✗, song details,
+// move, remove). Tapping a row also makes it the section the pedal records to.
 function renderSection(p, pIdx, m, mIdx, song = null) {
 	const st = sectionStats(m);
+	const cs = song ? chunkStatus(m, song) : null;
+	const open = openSectionId === m.id;
+	const panelId = `sec-panel-${pIdx}-${mIdx}`;
 	const li = h('li', {
-		class: `sec${song ? ' is-song' : ''}${m === currentTarget()?.section ? ' is-selected' : ''}`,
+		class: `sec${song ? ' is-song' : ''}${open ? ' is-open' : ''}${m === currentTarget()?.section ? ' is-selected' : ''}`,
 		'data-pidx': pIdx,
 		'data-midx': mIdx,
 		onclick: () => selectSection(p, m),
@@ -1709,22 +1723,49 @@ function renderSection(p, pIdx, m, mIdx, song = null) {
 	});
 	li._section = m;
 
-	const grip = h('button', {
-		class: 'grip',
-		type: 'button',
-		html: icons.grip,
-		'aria-label': `Move ${m.name}. Drag, or press arrow up or down.`,
-		// Only the grip starts a mouse drag, so inputs stay selectable.
-		onmousedown: () => (li.draggable = true),
-		onmouseup: () => (li.draggable = false),
-		onkeydown: (e) => {
-			if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
-			e.preventDefault();
-			const to = mIdx + (e.key === 'ArrowUp' ? -1 : 1);
-			moveSection(p, mIdx, to);
-			document.querySelector(`.sec[data-pidx="${pIdx}"][data-midx="${Math.max(0, Math.min(to, p.metronomes.length - 1))}"] .grip`)?.focus();
+	const rowName = h('span', { class: 'sec-label' }, m.name);
+	const rowTempo = h('b', {}, tempoLabel(m, song));
+	const head = h(
+		'button',
+		{
+			class: 'sec-open',
+			type: 'button',
+			'aria-expanded': String(open),
+			'aria-controls': panelId,
+			onclick: () => toggleSection(li, m),
 		},
-	});
+		h('span', { class: 'sec-title' }, rowName, cs && h('span', { class: 'sec-status' }, songRowStatus(cs))),
+		h('span', { class: 'sec-tempo' }, rowTempo, h('small', {}, 'BPM')),
+		h('span', { class: 'sec-len' }, formatDuration(m.duration)),
+		h('span', { class: 'chev', 'aria-hidden': 'true' }),
+	);
+	// Field edits update the row in place (a re-render here could swallow
+	// the click that moved focus away).
+	const syncRow = () => {
+		rowName.textContent = m.name;
+		rowTempo.textContent = tempoLabel(m, song);
+	};
+
+	const grip = h(
+		'button',
+		{
+			class: 'grip btn btn-quiet',
+			type: 'button',
+			'aria-label': `Move ${m.name}. Drag, or press arrow up or down.`,
+			// Only the grip starts a mouse drag, so inputs stay selectable.
+			onmousedown: () => (li.draggable = true),
+			onmouseup: () => (li.draggable = false),
+			onkeydown: (e) => {
+				if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+				e.preventDefault();
+				const to = mIdx + (e.key === 'ArrowUp' ? -1 : 1);
+				moveSection(p, mIdx, to);
+				document.querySelector(`.sec[data-pidx="${pIdx}"][data-midx="${Math.max(0, Math.min(to, p.metronomes.length - 1))}"] .grip`)?.focus();
+			},
+		},
+		iconEl('grip'),
+		'Move',
+	);
 	grip.addEventListener('touchstart', (e) => onTouchDragStart(e, pIdx, mIdx), { passive: false });
 
 	const fields = h(
@@ -1733,18 +1774,15 @@ function renderSection(p, pIdx, m, mIdx, song = null) {
 		h(
 			'label',
 			{ class: 'mini' },
-			h('input', {
-				type: 'number',
-				min: '20',
-				max: '300',
-				step: '1',
-				inputmode: 'numeric',
+			bpmInput({
+				class: 'tempo-input',
 				value: String(m.startBPM),
 				'aria-label': `${m.name} tempo (BPM)`,
 				onchange: (e) => {
 					m.startBPM = clampBPM(e.target.value, m.startBPM);
 					e.target.value = m.startBPM;
 					savePractice(p);
+					syncRow();
 				},
 			}),
 			'BPM',
@@ -1761,48 +1799,73 @@ function renderSection(p, pIdx, m, mIdx, song = null) {
 			formatDuration(m.duration),
 		),
 		!song &&
-		h(
-			'button',
-			{
-				class: 'ramp-btn',
-				type: 'button',
-				'aria-pressed': String(Boolean(m.ramp)),
-				onclick: () => {
-					m.ramp = !m.ramp;
-					if (m.ramp && !m.endBPM) m.endBPM = m.startBPM;
-					savePractice(p);
-					renderBuilder();
+			h(
+				'button',
+				{
+					class: 'ramp-btn',
+					type: 'button',
+					'aria-pressed': String(Boolean(m.ramp)),
+					onclick: () => {
+						m.ramp = !m.ramp;
+						if (m.ramp && !m.endBPM) m.endBPM = m.startBPM;
+						savePractice(p);
+						renderBuilder({ keepFocus: true });
+					},
 				},
-			},
-			iconEl('ramp'),
-			'Ramp',
-		),
+				iconEl('ramp'),
+				'Ramp',
+			),
 		!song &&
-		m.ramp &&
+			m.ramp &&
 			h(
 				'label',
 				{ class: 'mini' },
 				'to',
-				h('input', {
-					type: 'number',
-					min: '20',
-					max: '300',
-					step: '1',
-					inputmode: 'numeric',
+				bpmInput({
+					class: 'end-input',
 					value: String(m.endBPM || m.startBPM),
 					'aria-label': `${m.name} end tempo (BPM)`,
 					onchange: (e) => {
 						m.endBPM = clampBPM(e.target.value, m.endBPM || m.startBPM);
 						e.target.value = m.endBPM;
 						savePractice(p);
+						syncRow();
 					},
 				}),
 				'BPM',
 			),
 	);
 
-	li.append(
-		grip,
+	const remove = h(
+		'button',
+		{
+			class: 'sec-remove btn btn-quiet',
+			type: 'button',
+			'aria-label': `Remove section ${m.name}`,
+			onclick: (e) => {
+				e.stopPropagation();
+				const doRemove = () => {
+					const i = p.metronomes.indexOf(m);
+					if (i >= 0) p.metronomes.splice(i, 1);
+					savePractice(p);
+					renderBuilder();
+				};
+				if (st.s + st.f === 0) return doRemove();
+				confirmDialog({
+					title: 'Remove section?',
+					text: `“${m.name}” has ✓ ${st.s} / ✗ ${st.f} recorded. Removing it deletes those stats. Your all-time total is kept.`,
+					confirm: 'Remove',
+					onConfirm: doRemove,
+				});
+			},
+		},
+		iconEl('trash'),
+		'Remove',
+	);
+
+	const panel = h(
+		'div',
+		{ class: 'sec-panel', id: panelId, hidden: !open },
 		h('input', {
 			class: 'sec-name',
 			type: 'text',
@@ -1810,117 +1873,99 @@ function renderSection(p, pIdx, m, mIdx, song = null) {
 			'aria-label': 'Section name',
 			onchange: (e) => {
 				m.name = e.target.value.trim() || 'Section';
+				e.target.value = m.name;
 				savePractice(p);
-			},
-		}),
-		tallyInline(st),
-		h('button', {
-			class: 'btn btn-quiet btn-icon sec-remove',
-			type: 'button',
-			html: icons.cross,
-			'aria-label': `Remove section ${m.name}`,
-			onclick: (e) => {
-				e.stopPropagation();
-				const remove = () => {
-					const i = p.metronomes.indexOf(m);
-					if (i >= 0) p.metronomes.splice(i, 1);
-					savePractice(p);
-					renderBuilder();
-				};
-				if (st.s + st.f === 0) return remove();
-				confirmDialog({
-					title: 'Remove section?',
-					text: `“${m.name}” has ✓ ${st.s} / ✗ ${st.f} recorded. Removing it deletes those stats. Your all-time total is kept.`,
-					confirm: 'Remove',
-					onConfirm: remove,
-				});
+				syncRow();
+				renderRecordBar();
 			},
 		}),
 		fields,
-		...(song ? [songStatusEl(p, m, song)] : []), // native append: no null children
+		h('p', { class: 'sec-tally' }, 'Runs', tallyInline(st)),
+		cs && songDetailsEl(p, m, cs),
+		h('div', { class: 'sec-actions' }, grip, remove),
 	);
+
+	li.append(head, panel);
 	return li;
 }
 
-// Target BPM and one summary line for a song-mode routine.
-function songBar(p, song) {
+// One summary line for a song-mode routine: song tempo first, then what's
+// due; the bottleneck (also marked on its row) goes last, where truncation
+// costs least. A tempo above a lowered target says so instead of a % > 100.
+function songSummary(p, song) {
 	const target = songTarget(p);
 	const due = p.metronomes.filter((m) => chunkStatus(m, song).due).map((m) => m.name);
-	const dueText = due.length
-		? `Due today: ${due.slice(0, 2).join(', ')}${due.length > 2 ? ` +${due.length - 2}` : ''}`
-		: null;
-	// One line: song tempo first, then what's due; the bottleneck (also
-	// marked on its section) goes last, where truncation costs least.
-	const parts =
-		song.tempo === null
-			? ['Song tempo: not set yet · own a chunk on 2 days', dueText]
-			: [
-					song.pct !== null ? `Song tempo ${song.tempo} (${song.pct}%)` : `Song tempo ${song.tempo}`,
-					dueText,
-					song.bottleneck ? `Bottleneck: ${song.bottleneck.name}` : null,
-				];
+	const dueText = due.length ? `Due today: ${due.slice(0, 2).join(', ')}${due.length > 2 ? ` +${due.length - 2}` : ''}` : null;
+	let tempoText;
+	if (song.tempo === null) tempoText = 'Song tempo: not set yet · own a chunk on 2 days';
+	else if (target && song.tempo > target) tempoText = `Song tempo ${song.tempo} · above target ${target}`;
+	else if (song.pct !== null) tempoText = `Song tempo ${song.tempo} · ${song.pct}% of ${target}`;
+	else tempoText = `Song tempo ${song.tempo}`;
+	const parts = [tempoText, dueText, song.tempo !== null && song.bottleneck ? `Bottleneck: ${song.bottleneck.name}` : null];
+	const text = parts.filter(Boolean).join(' · ');
+	return h('p', { class: 'song-sum', title: text }, iconEl('song'), h('span', {}, text));
+}
+
+function targetField(p) {
+	const target = songTarget(p);
 	return h(
-		'div',
-		{ class: 'song-bar' },
-		h(
-			'label',
-			{ class: 'mini' },
-			'Target',
-			h('input', {
-				type: 'number',
-				min: '20',
-				max: '300',
-				step: '1',
-				inputmode: 'numeric',
-				placeholder: '–',
-				value: target === null ? '' : String(target),
-				'aria-label': `${p.name} target tempo (BPM)`,
-				onchange: (e) => {
-					const v = e.target.value.trim();
-					setSong(p, { target: v === '' ? null : clampBPM(v, target ?? 120) });
-					renderBuilder({ keepFocus: true });
-				},
-			}),
-			'BPM',
-		),
-		h('p', { class: 'song-sum', title: parts.filter(Boolean).join(' · ') }, parts.filter(Boolean).join(' · ')),
+		'label',
+		{ class: 'mini song-bar' },
+		iconEl('target'),
+		'Target',
+		bpmInput({
+			class: 'target-input',
+			placeholder: '–',
+			value: target === null ? '' : String(target),
+			'aria-label': `${p.name} target tempo (BPM)`,
+			onchange: (e) => {
+				const v = e.target.value.trim();
+				setSong(p, { target: v === '' ? null : clampBPM(v, target ?? 120) });
+				renderBuilder({ keepFocus: true });
+			},
+		}),
+		'BPM',
 	);
 }
 
 function renderRoutine(p, pIdx) {
 	const rt = routineStats(p);
 	const totalTime = p.metronomes.reduce((a, m) => a + (m.duration || 0), 0);
+	const songOn = isSong(p);
+	const song = songOn ? songNow(p) : null;
+	const optsOpen = openOptions.has(p.id);
+	const optsId = `routine-opts-${pIdx}`;
+	const n = p.metronomes.length;
+
 	const loopSwitch = h(
 		'button',
 		{
-			class: 'switch',
+			class: 'loop-switch switch',
 			type: 'button',
 			role: 'switch',
 			'aria-checked': String(Boolean(p.loop)),
 			onclick: () => {
 				p.loop = !p.loop;
-				loopSwitch.setAttribute('aria-checked', String(p.loop));
 				savePractice(p);
+				renderBuilder({ keepFocus: true });
 			},
 		},
 		h('span', { class: 'switch-track', 'aria-hidden': 'true' }),
 		iconEl('loop'),
 		'Loop',
 	);
-	const songOn = isSong(p);
-	const song = songOn ? songNow(p) : null;
 	const songSwitch = h(
 		'button',
 		{
-			class: 'switch',
+			class: 'song-switch switch',
 			type: 'button',
 			role: 'switch',
 			'aria-checked': String(songOn),
-			disabled: !p.metronomes.length,
+			disabled: !n,
 			title: 'Song mode: tempo ladder, owned tempo and reviews per section',
 			onclick: () => {
 				setSong(p, { on: !songOn });
-				renderBuilder();
+				renderBuilder({ keepFocus: true });
 			},
 		},
 		h('span', { class: 'switch-track', 'aria-hidden': 'true' }),
@@ -1928,32 +1973,18 @@ function renderRoutine(p, pIdx) {
 		'Song mode',
 	);
 
-	return h(
-		'article',
-		{ class: 'routine', 'aria-label': p.name },
+	const options = h(
+		'div',
+		{ class: 'routine-options', id: optsId, hidden: !optsOpen },
+		h('div', { class: 'opt-row' }, loopSwitch, songSwitch, songOn && targetField(p)),
 		h(
 			'div',
-			{ class: 'routine-head' },
-			h('input', {
-				class: 'routine-name',
-				type: 'text',
-				value: p.name,
-				'aria-label': 'Routine name',
-				onchange: (e) => {
-					p.name = e.target.value.trim() || 'Untitled routine';
-					savePractice(p);
-					renderRecordBar();
-				},
-			}),
+			{ class: 'opt-row' },
 			h(
-				'div',
-				{ class: 'routine-tools' },
-				h('button', {
-					class: 'btn btn-quiet btn-icon',
+				'button',
+				{
+					class: 'reset-btn btn btn-quiet',
 					type: 'button',
-					html: icons.reset,
-					title: 'Reset stats',
-					'aria-label': `Reset stats for ${p.name}`,
 					disabled: rt.s + rt.f === 0,
 					onclick: () =>
 						confirmDialog({
@@ -1971,27 +2002,63 @@ function renderRoutine(p, pIdx) {
 								renderBuilder();
 							},
 						}),
-				}),
-				h('button', {
-					class: 'btn btn-quiet btn-icon',
-					type: 'button',
-					html: icons.trash,
-					title: 'Delete routine',
-					'aria-label': `Delete routine ${p.name}`,
-					onclick: () => openDeleteDialog(p),
-				}),
+				},
+				iconEl('reset'),
+				'Reset stats',
 			),
 			h(
-				'div',
-				{ class: 'routine-meta' },
-				tallyInline(rt),
-				h('span', { class: 'meta-item' }, iconEl('layers'), `${p.metronomes.length} ${p.metronomes.length === 1 ? 'section' : 'sections'}`),
-				h('span', { class: 'meta-item' }, iconEl('clock'), formatDuration(totalTime)),
-				loopSwitch,
-				songSwitch,
+				'button',
+				{ class: 'delete-btn btn btn-quiet', type: 'button', onclick: () => openDeleteDialog(p) },
+				iconEl('trash'),
+				'Delete routine',
 			),
-			songOn && songBar(p, song),
-			shareBar(rt),
+		),
+	);
+	const optsBtn = h(
+		'button',
+		{
+			class: 'opts-btn btn btn-quiet',
+			type: 'button',
+			'aria-expanded': String(optsOpen),
+			'aria-controls': optsId,
+			onclick: () => {
+				const next = !openOptions.has(p.id);
+				if (next) openOptions.add(p.id);
+				else openOptions.delete(p.id);
+				optsBtn.setAttribute('aria-expanded', String(next));
+				options.hidden = !next;
+			},
+		},
+		iconEl('sliders'),
+		'Options',
+	);
+
+	return h(
+		'article',
+		{ class: 'routine', 'aria-label': p.name, 'data-pidx': pIdx },
+		h(
+			'div',
+			{ class: 'routine-head' },
+			h('input', {
+				class: 'routine-name',
+				type: 'text',
+				value: p.name,
+				'aria-label': 'Routine name',
+				onchange: (e) => {
+					p.name = e.target.value.trim() || 'Untitled routine';
+					savePractice(p);
+					renderRecordBar();
+				},
+			}),
+			optsBtn,
+			h(
+				'p',
+				{ class: 'routine-meta' },
+				h('span', {}, `${n} ${n === 1 ? 'section' : 'sections'} · ${formatDuration(totalTime)}${p.loop ? ' · Loop' : ''}`),
+				rt.s + rt.f > 0 && tallyInline(rt),
+			),
+			songOn && songSummary(p, song),
+			options,
 		),
 		h('ol', { class: 'sections' }, p.metronomes.map((m, mIdx) => renderSection(p, pIdx, m, mIdx, song))),
 		h(
@@ -2000,7 +2067,7 @@ function renderRoutine(p, pIdx) {
 			h(
 				'button',
 				{
-					class: 'btn add',
+					class: 'add btn btn-quiet',
 					type: 'button',
 					onclick: () => {
 						const last = p.metronomes[p.metronomes.length - 1];
@@ -2013,6 +2080,7 @@ function renderRoutine(p, pIdx) {
 						};
 						if (songOf(p)) section.song = { ...songOf(p) };
 						p.metronomes.push(section);
+						openSectionId = section.id; // open it, ready to name
 						selectSection(p, section);
 						savePractice(p);
 						renderBuilder();
@@ -2024,9 +2092,9 @@ function renderRoutine(p, pIdx) {
 			h(
 				'button',
 				{
-					class: 'btn btn-primary start',
+					class: 'start btn btn-primary',
 					type: 'button',
-					disabled: !p.metronomes.length,
+					disabled: !n,
 					onclick: () => startRoutine(p),
 				},
 				iconEl('play'),
@@ -2051,12 +2119,14 @@ function renderRecordBar() {
 function renderBuilder({ keepFocus = false } = {}) {
 	// Re-rendering replaces the controls; remember which one had focus
 	// (by section position + class) so the pedal/keyboard user keeps their place.
+	// Inside a routine (not a section), the routine's position is the key.
 	const active = keepFocus ? document.activeElement : null;
 	const sec = active?.closest?.('#app .sec');
-	const focusSelector =
-		sec && active.classList[0]
-			? `.sec[data-pidx="${sec.dataset.pidx}"][data-midx="${sec.dataset.midx}"] .${active.classList[0]}`
-			: null;
+	const routine = active?.closest?.('#app .routine');
+	const cls = active?.classList?.[0];
+	let focusSelector = null;
+	if (cls && sec) focusSelector = `.sec[data-pidx="${sec.dataset.pidx}"][data-midx="${sec.dataset.midx}"] .${cls}`;
+	else if (cls && routine) focusSelector = `.routine[data-pidx="${routine.dataset.pidx}"] .${cls}`;
 
 	renderAlltime();
 	const app = $('app');
@@ -2209,6 +2279,7 @@ $('bar-good').innerHTML = icons.check;
 $('bar-bad').innerHTML = icons.cross;
 $('bar-undo').innerHTML = icons.undo;
 $('stop').replaceChildren(iconEl('back'), 'Exit');
+$('player-more-summary').replaceChildren(iconEl('sliders'), 'Settings');
 $('undoBtn').replaceChildren(iconEl('undo'), 'Undo');
 $('minus').innerHTML = icons.minus;
 $('plus').innerHTML = icons.plus;

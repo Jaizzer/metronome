@@ -31,5 +31,6 @@ export const icons = {
 	metronome: svg('<path d="M6.5 20.5h11L14 3.5h-4z"/><path d="M12 15.5l5.5-9"/><path d="M8 15.5h8"/>'),
 	cloud: svg('<path d="M7 18.5a4.5 4.5 0 01-.6-8.96A6 6 0 0118 9.5a4.5 4.5 0 01-.5 9z"/><path d="M9.5 14l2 2 3.5-3.5"/>'),
 	song: svg('<path d="M9 18V5.5l11-2V16"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>'),
+	sliders: svg('<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>'),
 	target: svg('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12h.01" stroke-width="3"/>'),
 };

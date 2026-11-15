@@ -291,7 +291,7 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 .mast .btn {
-	min-height: 40px;
+	min-height: 44px;
 	border-color: var(--on-ink);
 	color: var(--on-ink);
 	padding: 0 var(--s3);
@@ -373,7 +373,7 @@ input[type='number']::-webkit-outer-spin-button {
 
 .builder {
 	min-height: 100dvh;
-	padding-bottom: 140px; /* room for the record bar */
+	padding-bottom: calc(120px + env(safe-area-inset-bottom)); /* room for the record bar */
 }
 
 .builder-inner {
@@ -384,10 +384,10 @@ input[type='number']::-webkit-outer-spin-button {
 
 .builder-head {
 	display: flex;
-	align-items: end;
+	align-items: center;
 	justify-content: space-between;
 	gap: var(--s3);
-	padding: var(--s6) 0 var(--s4);
+	padding: var(--s6) 0 var(--s1);
 }
 
 .builder-head h1 {
@@ -399,20 +399,32 @@ input[type='number']::-webkit-outer-spin-button {
 	text-transform: uppercase;
 }
 
-.alltime {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--s1) var(--s4);
-	padding: var(--s3) 0;
-	border-top: 2px solid var(--rule);
-	border-bottom: 2px solid var(--rule);
+/* All-time ✓/✗: one quiet line, no rules. */
+.alltime,
+.alltime-row {
+	margin: 0;
 	color: var(--paper-2);
 	font-size: 14px;
 }
 
-.alltime b {
+.alltime {
+	padding-bottom: var(--s4);
+}
+
+.alltime b,
+.alltime-row b {
 	color: var(--paper);
 	font-weight: 600;
+}
+
+.alltime .g,
+.alltime-row .g {
+	color: var(--good);
+}
+
+.alltime .b,
+.alltime-row .b {
+	color: var(--bad);
 }
 
 .empty {
@@ -425,23 +437,23 @@ input[type='number']::-webkit-outer-spin-button {
 	margin: 0 0 var(--s4);
 }
 
-/* One routine = one block between rules (no cards). */
+/* One routine = one block under a 2px rule (no cards). */
 .routine {
-	padding: var(--s5) 0 var(--s6);
-	border-bottom: 2px solid var(--rule);
+	padding: var(--s4) 0 var(--s6);
+	border-top: 2px solid var(--rule);
 }
 
 .routine-head {
 	display: grid;
 	grid-template-columns: 1fr auto;
-	gap: var(--s2) var(--s3);
+	gap: 0 var(--s2);
 	align-items: center;
 }
 
 .routine-name {
 	min-width: 0;
 	font-family: var(--font-num) !important;
-	font-size: 28px !important;
+	font-size: 30px !important;
 	font-weight: 700;
 	text-transform: uppercase;
 	background: transparent !important;
@@ -460,12 +472,28 @@ input[type='number']::-webkit-outer-spin-button {
 	background: var(--stock-input) !important;
 }
 
+.opts-btn {
+	padding: 0 var(--s3);
+	font-size: 14px;
+}
+
+.opts-btn svg.icon {
+	width: 18px;
+	height: 18px;
+}
+
+.opts-btn[aria-expanded='true'] {
+	color: var(--paper);
+	border-color: var(--rule-strong);
+}
+
 .routine-meta {
 	grid-column: 1 / -1;
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--s2) var(--s4);
+	gap: var(--s1) var(--s4);
+	margin: 0;
 	font-size: 14px;
 	color: var(--paper-2);
 }
@@ -473,7 +501,7 @@ input[type='number']::-webkit-outer-spin-button {
 .tally-inline {
 	display: inline-flex;
 	align-items: center;
-	gap: var(--s3);
+	gap: var(--s2);
 	font-variant-numeric: tabular-nums;
 }
 
@@ -490,6 +518,43 @@ input[type='number']::-webkit-outer-spin-button {
 .tally-inline .a {
 	color: var(--paper);
 	font-weight: 600;
+}
+
+/* Routine options: Loop, Song mode, target, reset, delete — shown on demand. */
+.routine-options {
+	grid-column: 1 / -1;
+	display: grid;
+	gap: var(--s2);
+	margin-top: var(--s3);
+	padding: var(--s2) var(--s3);
+	border-radius: var(--radius);
+	background: var(--stock-raised);
+}
+
+.opt-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--s1) var(--s4);
+}
+
+.opt-row + .opt-row {
+	padding-top: var(--s2);
+	border-top: 1px solid var(--rule);
+}
+
+.opt-row .btn {
+	padding: 0 var(--s2);
+	font-size: 14px;
+}
+
+.opt-row svg.icon {
+	width: 16px;
+	height: 16px;
+}
+
+.delete-btn:hover:not(:disabled) {
+	color: var(--bad);
 }
 
 .switch {
@@ -535,49 +600,36 @@ input[type='number']::-webkit-outer-spin-button {
 	background: var(--on-ink);
 }
 
+.switch svg.icon {
+	width: 16px;
+	height: 16px;
+}
+
+/* ---------- Sections: a calm list; one row opens for editing ---------- */
+
 .sections {
 	list-style: none;
-	margin: var(--s4) 0 0;
+	margin: var(--s3) 0 0;
 	padding: 0;
 }
 
 .sec {
 	position: relative;
-	display: grid;
-	grid-template-columns: 40px 1fr auto 44px;
-	grid-template-areas:
-		'grip name stats remove'
-		'. fields fields fields';
-	gap: var(--s2);
-	align-items: center;
-	padding: var(--s3) 0 var(--s3);
 	border-top: 1px solid var(--rule);
-	cursor: pointer;
 }
 
-.sec:first-child {
-	border-top: none;
+.sec:last-child {
+	border-bottom: 1px solid var(--rule);
 }
 
-/* Selected section: an amber stop on the left gutter. */
-.sec::before {
-	content: '';
-	position: absolute;
-	left: -10px;
-	top: 18px;
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: transparent;
+.sec.is-open {
+	background: var(--stock-raised);
+	border-color: transparent;
+	border-radius: var(--radius);
 }
 
-.sec.is-selected {
-	background: linear-gradient(90deg, rgba(255, 178, 36, 0.07), transparent 70%);
-}
-
-.sec.is-selected::before {
-	background: var(--amber);
-	box-shadow: 0 0 0 3px var(--stock), 0 0 0 4px var(--amber);
+.sec.is-open + .sec {
+	border-top-color: transparent;
 }
 
 .sec.is-dragging {
@@ -589,47 +641,107 @@ input[type='number']::-webkit-outer-spin-button {
 	outline-offset: -2px;
 }
 
-.grip {
-	grid-area: grip;
+/* The row: selected dot · name (+ song status) · tempo · length · chevron. */
+.sec-open {
 	display: grid;
-	place-items: center;
-	width: 40px;
-	height: 44px;
+	grid-template-columns: 8px minmax(0, 1fr) auto 3.4em 12px;
+	align-items: center;
+	gap: var(--s3);
+	width: 100%;
+	min-height: 60px;
+	padding: var(--s2) var(--s3) var(--s2) var(--s2);
 	border: none;
-	background: none;
-	color: var(--paper-3);
-	cursor: grab;
-	touch-action: none;
 	border-radius: var(--radius);
+	background: none;
+	text-align: left;
 }
 
-.grip:hover {
-	color: var(--paper);
+.sec-open::before {
+	content: '';
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
 }
 
-.grip:active {
-	cursor: grabbing;
+/* Selected section (where the pedal records): an amber stop. */
+.sec.is-selected .sec-open::before {
+	background: var(--amber);
 }
 
-.sec-name {
+.sec-open:hover .sec-label {
+	text-decoration: underline;
+	text-decoration-color: var(--rule-strong);
+	text-underline-offset: 4px;
+}
+
+.sec-title {
+	display: grid;
 	min-width: 0;
-	grid-area: name;
+}
+
+.sec-label {
 	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
-.sec .tally-inline {
-	grid-area: stats;
-	font-size: 14px;
-	gap: var(--s2);
+.sec-status {
+	font-size: 13px;
+	color: var(--paper-2);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
-.sec-remove {
-	grid-area: remove;
+.sec-tempo {
+	justify-self: end;
+	display: inline-flex;
+	align-items: baseline;
+	gap: 3px;
+	white-space: nowrap;
+}
+
+.sec-tempo b {
+	font-family: var(--font-num);
+	font-size: 24px;
+	font-weight: 600;
+	line-height: 1;
+}
+
+.sec-tempo small,
+.sec-len {
+	font-size: 13px;
+	font-weight: 600;
 	color: var(--paper-3);
+}
+
+.sec-len {
+	text-align: right;
+	color: var(--paper-2);
+	white-space: nowrap;
+}
+
+.chev {
+	width: 8px;
+	height: 8px;
+	border-right: 2px solid var(--paper-3);
+	border-bottom: 2px solid var(--paper-3);
+	transform: rotate(45deg) translate(-2px, -2px);
+}
+
+.sec.is-open .chev {
+	transform: rotate(225deg) translate(-2px, -2px);
+}
+
+/* The open panel: every editing control for one section. */
+.sec-panel {
+	display: grid;
+	gap: var(--s3);
+	padding: 0 var(--s3) var(--s3) calc(var(--s2) + 8px + var(--s3));
 }
 
 .sec-fields {
-	grid-area: fields;
 	display: flex;
 	flex-wrap: wrap;
 	gap: var(--s2);
@@ -654,26 +766,30 @@ input[type='number']::-webkit-outer-spin-button {
 	padding: 0 var(--s1);
 }
 
-.duration-btn {
+.duration-btn,
+.ramp-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
 	min-height: 44px;
 	padding: 0 var(--s3);
 	border-radius: var(--radius);
 	border: 2px solid var(--rule);
+}
+
+.duration-btn {
 	background: var(--stock-input);
 	font-family: var(--font-num);
 	font-size: 22px;
 	font-weight: 600;
 }
 
-.duration-btn:hover {
+.duration-btn:hover,
+.ramp-btn:hover {
 	border-color: var(--rule-strong);
 }
 
 .ramp-btn {
-	min-height: 44px;
-	padding: 0 var(--s3);
-	border-radius: var(--radius);
-	border: 2px solid var(--rule);
 	background: none;
 	font-size: 13px;
 	font-weight: 700;
@@ -685,35 +801,78 @@ input[type='number']::-webkit-outer-spin-button {
 	color: var(--amber);
 }
 
+.duration-btn svg.icon,
+.ramp-btn svg.icon {
+	width: 16px;
+	height: 16px;
+}
+
+.duration-btn svg.icon {
+	color: var(--paper-3);
+}
+
+.sec-tally {
+	display: flex;
+	align-items: center;
+	gap: var(--s3);
+	margin: 0;
+	font-size: 14px;
+	color: var(--paper-2);
+}
+
+.sec-actions {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--s2);
+	margin: 0 calc(var(--s2) * -1) calc(var(--s2) * -1);
+}
+
+.sec-actions .btn {
+	padding: 0 var(--s2);
+	font-size: 14px;
+	color: var(--paper-2);
+}
+
+.sec-actions svg.icon {
+	width: 18px;
+	height: 18px;
+}
+
+.grip {
+	cursor: grab;
+	touch-action: none;
+}
+
+.grip:active {
+	cursor: grabbing;
+}
+
+.sec-remove:hover:not(:disabled) {
+	color: var(--bad) !important;
+}
+
 .routine-actions {
 	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: var(--s2);
-	margin-top: var(--s4);
+	gap: var(--s3);
+	margin-top: var(--s2);
+}
+
+.routine-actions .add {
+	justify-self: start;
+	padding: 0 var(--s2);
+	margin-left: calc(var(--s2) * -1);
+	color: var(--paper-2);
 }
 
 .routine-actions .start {
-	grid-column: 1 / -1;
 	min-height: 56px;
 	font-size: 17px;
 }
 
-.routine-actions .add {
-	grid-column: 1 / -1;
-	border-style: dashed;
-	color: var(--paper-2);
-}
-
-.routine-tools {
-	display: flex;
-	justify-content: flex-end;
-	gap: var(--s1);
-}
-
-.signout-row {
-	display: flex;
-	justify-content: center;
-	padding: var(--s6) 0;
+.add-routine {
+	width: 100%;
+	margin-top: var(--s4);
+	border: 2px dashed var(--rule-strong);
 }
 
 /* Sticky bottom bar: where the pedal records to, plus ✓ / ✗ / Undo. */
@@ -829,7 +988,7 @@ input[type='number']::-webkit-outer-spin-button {
 .player-main {
 	flex: 1;
 	display: grid;
-	gap: var(--s4);
+	gap: var(--s3);
 	width: 100%;
 	max-width: 1100px;
 	margin: 0 auto;
@@ -1086,14 +1245,6 @@ input[type='number']::-webkit-outer-spin-button {
 	gap: var(--s2);
 }
 
-.tally-head {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: var(--s2);
-	min-height: 48px;
-}
-
 .pending {
 	display: inline-flex;
 	align-items: center;
@@ -1123,8 +1274,22 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 .pedal-hint {
+	margin: 0;
 	font-size: 13px;
-	color: var(--paper-3);
+	color: var(--paper-2);
+}
+
+/* Under the panels: section/routine accuracy, the pending chip, Undo. */
+.tally-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--s1) var(--s3);
+	min-height: 48px;
+}
+
+.tally-row .btn {
+	margin-left: auto;
 }
 
 .panels {
@@ -1139,8 +1304,8 @@ input[type='number']::-webkit-outer-spin-button {
 	justify-items: start;
 	align-content: space-between;
 	gap: var(--s2);
-	min-height: 150px;
-	padding: var(--s3) var(--s3) var(--s4);
+	min-height: 128px;
+	padding: var(--s3) var(--s3) var(--s3);
 	border-radius: var(--radius);
 	border: 2px solid currentColor;
 	background: var(--stock-raised);
@@ -1176,11 +1341,6 @@ input[type='number']::-webkit-outer-spin-button {
 	font-size: clamp(72px, 22vw, 120px);
 	line-height: 0.85;
 	letter-spacing: -0.02em;
-}
-
-.panel-sub {
-	font-size: 13px;
-	color: var(--paper-2);
 }
 
 /* The overprint: a record floods the panel with its ink and knocks the
@@ -1219,14 +1379,64 @@ input[type='number']::-webkit-outer-spin-button {
 	font-weight: 600;
 }
 
+/* Volume, Show stats, all-time and the pedal hint: one tap away. */
+.player-more {
+	border-top: 1px solid var(--rule);
+}
+
+.player-more summary {
+	display: flex;
+	align-items: center;
+	gap: var(--s2);
+	min-height: 48px;
+	cursor: pointer;
+	list-style: none;
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--paper-2);
+}
+
+.player-more summary::-webkit-details-marker {
+	display: none;
+}
+
+.player-more summary::after {
+	content: '';
+	width: 8px;
+	height: 8px;
+	margin-left: var(--s1);
+	border-right: 2px solid var(--paper-3);
+	border-bottom: 2px solid var(--paper-3);
+	transform: rotate(45deg) translate(-2px, -2px);
+}
+
+.player-more[open] summary::after {
+	transform: rotate(225deg) translate(-2px, -2px);
+}
+
+.player-more summary svg.icon {
+	width: 18px;
+	height: 18px;
+}
+
 .player-settings {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
 	gap: var(--s2) var(--s4);
-	padding-top: var(--s4);
-	border-top: 2px solid var(--rule);
+	padding-bottom: var(--s3);
+}
+
+.alltime-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0 var(--s2);
+}
+
+.alltime-row .btn {
+	padding: 0 var(--s2);
 }
 
 .volume {
@@ -1321,7 +1531,7 @@ input[type='range']:focus-visible {
 	.panel {
 		min-height: 220px;
 	}
-	.player-settings {
+	.player-more {
 		grid-area: settings;
 	}
 }
@@ -1485,57 +1695,6 @@ dialog p {
 	gap: var(--s1);
 }
 
-.alltime-label,
-.meta-item {
-	display: inline-flex;
-	align-items: center;
-	gap: var(--s1);
-}
-
-.alltime-label svg.icon,
-.meta-item svg.icon {
-	width: 16px;
-	height: 16px;
-	color: var(--paper-3);
-}
-
-.duration-btn,
-.ramp-btn {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-}
-
-.duration-btn svg.icon {
-	width: 16px;
-	height: 16px;
-	color: var(--paper-3);
-}
-
-.ramp-btn svg.icon,
-.switch svg.icon {
-	width: 16px;
-	height: 16px;
-}
-
-/* ✓/✗ share of a routine's runs; the ✓/✗ counts sit right above it. */
-.share {
-	grid-column: 1 / -1;
-	display: flex;
-	gap: 2px;
-	height: 6px;
-	border-radius: 3px;
-	overflow: hidden;
-	background: var(--rule);
-}
-
-.share-g {
-	background: var(--good);
-}
-
-.share-b {
-	background: var(--bad);
-}
 
 .empty-art {
 	display: block;
@@ -1551,15 +1710,6 @@ dialog p {
 
 /* ---------- Routine layout: List / Slide ---------- */
 
-.view-bar {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	justify-content: space-between;
-	gap: var(--s2);
-	padding: var(--s3) 0 0;
-}
-
 .seg {
 	display: inline-flex;
 	padding: 2px;
@@ -1571,7 +1721,7 @@ dialog p {
 	display: inline-flex;
 	align-items: center;
 	gap: var(--s2);
-	min-height: 40px;
+	min-height: 44px;
 	padding: 0 var(--s3);
 	border: none;
 	border-radius: 4px;
@@ -1596,9 +1746,11 @@ dialog p {
 }
 
 .pager {
-	display: inline-flex;
+	display: flex;
 	align-items: center;
+	justify-content: center;
 	gap: var(--s1);
+	padding-bottom: var(--s2);
 }
 
 .pager[hidden],
@@ -1631,11 +1783,6 @@ dialog p {
 
 #app.is-slides::-webkit-scrollbar {
 	display: none;
-}
-
-/* The slide track clips overflow, so the selected-section stop sits inside it. */
-#app.is-slides .sec::before {
-	left: 2px;
 }
 
 #app.is-slides > .routine {
@@ -1676,79 +1823,51 @@ dialog p {
 
 /* ---------- Song mode ---------- */
 
-.song-bar {
+/* One summary line under the routine head; truncates rather than wraps. */
+.song-sum {
 	grid-column: 1 / -1;
 	display: flex;
-	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--s2) var(--s4);
+	gap: var(--s2);
+	margin: var(--s1) 0 0;
+	min-width: 0;
+	font-size: 14px;
+	color: var(--paper);
+	font-variant-numeric: tabular-nums;
 }
 
-.song-sum {
-	margin: 0;
-	flex: 1 1 220px;
+.song-sum span {
 	min-width: 0;
 	overflow: hidden;
 	white-space: nowrap;
 	text-overflow: ellipsis;
-	font-size: 14px;
-	color: var(--paper-2);
-	font-variant-numeric: tabular-nums;
 }
 
-.sec.is-song {
-	grid-template-areas:
-		'grip name stats remove'
-		'. fields fields fields'
-		'. song song song';
+.song-sum svg.icon,
+.song-bar svg.icon {
+	width: 16px;
+	height: 16px;
+	color: var(--paper-3);
 }
 
 .sec-song {
-	grid-area: song;
-	min-width: 0;
+	display: grid;
+	gap: var(--s2);
 	font-size: 14px;
 	color: var(--paper-2);
 	font-variant-numeric: tabular-nums;
 }
 
-.sec-song summary {
-	display: block;
-	min-height: 44px;
-	padding: 12px 0;
-	line-height: 20px;
-	cursor: pointer;
-	font-weight: 600;
-	color: var(--paper);
-	list-style: none;
-}
-
-.sec-song summary::-webkit-details-marker {
-	display: none;
-}
-
-/* A chevron drawn in paper-3: turns when the details are open. */
-.sec-song summary::after {
-	content: '';
-	display: inline-block;
-	vertical-align: 3px;
-	width: 7px;
-	height: 7px;
-	margin-left: var(--s2);
-	border-right: 2px solid var(--paper-3);
-	border-bottom: 2px solid var(--paper-3);
-	transform: rotate(45deg) translate(-2px, -2px);
-}
-
-.sec-song[open] summary::after {
-	transform: rotate(225deg) translate(-2px, -2px);
-}
-
 .sec-song p {
-	margin: 0 0 var(--s1);
+	margin: 0;
+}
+
+.sec-song .sec-advice {
+	color: var(--paper);
 }
 
 .sec-kind {
-	margin: var(--s1) 0 var(--s2);
+	justify-self: start;
 }
 
 .sec-kind .seg-btn {
@@ -1758,47 +1877,16 @@ dialog p {
 /* ---------- Phones ---------- */
 
 @media (max-width: 560px) {
-	/* The section name gets the whole row; its ✓/✗ tally moves under it. */
-	.sec {
-		grid-template-columns: 40px 1fr 44px;
-		grid-template-areas:
-			'grip name remove'
-			'. stats stats'
-			'. fields fields';
-		row-gap: var(--s2);
-	}
-
-	.sec.is-song {
-		grid-template-areas:
-			'grip name remove'
-			'. stats stats'
-			'. fields fields'
-			'. song song';
-	}
-
-	.sec .tally-inline {
-		justify-self: start;
-		font-size: 13px;
-	}
-
-	.sec::before {
-		left: -8px;
-	}
-
 	.builder-head h1 {
 		font-size: 34px;
 	}
 
 	.routine-name {
-		font-size: 24px !important;
+		font-size: 26px !important;
 	}
 
-	.routine-meta {
-		gap: var(--s1) var(--s3);
-	}
-
-	.builder {
-		padding-bottom: calc(140px + env(safe-area-inset-bottom));
+	.seg-btn {
+		padding: 0 var(--s2);
 	}
 }
 
