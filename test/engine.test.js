@@ -19,6 +19,8 @@ import {
 	coldThreshold,
 	nextStep,
 	previousTop,
+	coldDoneToday,
+	checkCapFor,
 	LOG_CAP,
 } from '../src/engine.js';
 
@@ -196,4 +198,52 @@ test('a failed cold check drops to max(owned, stepDown(probe)) and owned holds',
 	assert.equal(day.afterCold, Math.max(clean[5].owned, stepDown(day.probe)));
 	assert.equal(day.owned, miss[5].owned); // a missed check doesn't raise it
 	assert.ok(clean[6].owned > miss[6].owned);
+});
+
+test('lowered target: the daily check at the capped probe still counts', () => {
+	const m = { startBPM: 125, log: [at(0, 's', 125, 0), at(1, 's', 125, 0)] };
+	const song = songState([m], 100); // target lowered from 120: ceiling 110
+	const day2 = T0 + 2 * DAY;
+	assert.equal(sessionStart(m, song, day2), 110);
+	const cc = checkCapFor(m, song);
+	assert.equal(coldThreshold(m.log, dayKey(day2), cc), stepDown(110));
+	m.log.push(at(2, 's', 110, 0));
+	assert.equal(coldDoneToday(m.log, day2, cc), true);
+	assert.equal(nextReview(m.log, cc), dayKey(T0 + 9 * DAY)); // 3 passed checks → 7 days
+	assert.equal(coldDoneToday(m.log, day2), false); // uncapped threshold 120 would never count it
+	assert.equal(chunkStatus(m, songState([m], 100), day2).due, false);
+});
+
+test('manual overshoot above the cap: next day’s check at the probe counts', () => {
+	// joined chunk, song tempo 70 → cap 77; the owner pushed to 90 by hand
+	const m = { joined: true, startBPM: 77, log: [at(0, 's', 70, 0), at(1, 's', 76, 0), at(1, 's', 90, 5), at(1, 's', 90, 6)] };
+	let song = songState([m], 120);
+	assert.equal(song.tempo, 70);
+	assert.equal(song.cap, 77);
+	const day2 = T0 + 2 * DAY;
+	assert.equal(sessionStart(m, song, day2), 77);
+	const a = at(2, 's', 77, 0);
+	m.log.push(a);
+	const r = nextStep(m, [m], 120, a);
+	assert.equal(r.warmup, undefined);
+	song = songState([m], 120);
+	assert.equal(coldDoneToday(m.log, day2, checkCapFor(m, song)), true);
+	assert.equal(song.tempo, 76); // the check counted: owned rose
+	assert.equal(chunkStatus(m, song, day2).owned, 76);
+});
+
+test('warm-ups before the daily check don’t move the tempo; after it the ladder works at any tempo', () => {
+	const m = { startBPM: 80, log: [at(0, 's', 80, 0)] };
+	const play = (k, bpm, minute) => {
+		const a = at(1, k, bpm, minute);
+		m.log.push(a);
+		return nextStep(m, [m], 120, a);
+	};
+	assert.equal(play('s', 60, 0).warmup, true);
+	const second = play('s', 60, 1);
+	assert.equal(second.warmup, true); // 2 ✓ at 60 would otherwise climb
+	assert.equal(second.action, null);
+	assert.equal(play('s', 80, 2).warmup, undefined); // the daily check
+	play('s', 60, 3);
+	assert.equal(play('s', 60, 4).action, 'up'); // after the check: normal ladder
 });

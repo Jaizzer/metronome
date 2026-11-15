@@ -115,14 +115,16 @@ export function previousTop(log, today = dayKey(Date.now())) {
 	return before.length ? before[before.length - 1].top : null;
 }
 
-// The day's cold check: its first attempt at or above stepDown(previous
-// practice day's top ✓). Slower attempts before it are warm-ups. With no
+// The day's cold check: its first attempt at or above stepDown(min(previous
+// practice day's top ✓, cap)), where cap is the chunk's check cap (see
+// songState), so a lowered target or a manual overshoot above the cap can't
+// make the check impossible. Slower attempts before it are warm-ups. With no
 // earlier ✓ (first day, or an all-✗ day before), the first attempt counts.
-export function coldAttempts(log) {
+export function coldAttempts(log, cap = Infinity) {
 	const out = [];
 	let prevTop = 0;
 	for (const { day, list, top } of practiceDays(log)) {
-		const min = prevTop ? stepDown(prevTop) : 0;
+		const min = prevTop ? stepDown(Math.min(prevTop, cap)) : 0;
 		const c = list.find((a) => a.bpm >= min);
 		if (c) out.push({ ...c, day });
 		prevTop = top;
@@ -131,24 +133,24 @@ export function coldAttempts(log) {
 }
 
 // Lowest tempo that counts as today's cold check (null: any tempo does).
-export function coldThreshold(log, today = dayKey(Date.now())) {
+export function coldThreshold(log, today = dayKey(Date.now()), cap = Infinity) {
 	const top = previousTop(log, today);
-	return top ? stepDown(top) : null;
+	return top ? stepDown(Math.min(top, cap)) : null;
 }
 
-export function isColdAttempt(log, attempt) {
-	return coldAttempts(log).some((c) => c.id === attempt.id);
+export function isColdAttempt(log, attempt, cap = Infinity) {
+	return coldAttempts(log, cap).some((c) => c.id === attempt.id);
 }
 
 // Has today's cold check been played yet?
-export function coldDoneToday(log, now = Date.now()) {
+export function coldDoneToday(log, now = Date.now(), cap = Infinity) {
 	const today = dayKey(now);
-	return coldAttempts(log).some((c) => c.day === today);
+	return coldAttempts(log, cap).some((c) => c.day === today);
 }
 
 // Highest tempo whose cold attempt passed on 2 separate days, or null.
-export function ownedTempo(log) {
-	const best = coldAttempts(log)
+export function ownedTempo(log, cap = Infinity) {
+	const best = coldAttempts(log, cap)
 		.filter((a) => a.k === 's')
 		.map((a) => a.bpm)
 		.sort((a, b) => b - a);
@@ -157,9 +159,9 @@ export function ownedTempo(log) {
 
 // When this chunk's next cold check is due (day key), or null if it has no
 // owned tempo yet (then it's practised every session anyway).
-export function nextReview(log) {
-	const cold = coldAttempts(log);
-	if (!cold.length || ownedTempo(log) === null) return null;
+export function nextReview(log, cap = Infinity) {
+	const cold = coldAttempts(log, cap);
+	if (!cold.length || ownedTempo(log, cap) === null) return null;
 	let run = 0; // consecutive passed cold checks, newest backwards
 	for (let i = cold.length - 1; i >= 0 && cold[i].k === 's'; i--) run++;
 	const last = cold[cold.length - 1];
@@ -195,31 +197,48 @@ export function ladder(log, bpm, cap = MAX_BPM) {
 
 // ---------- Song level ----------
 
-// sections: the routine's sections; kind 'run' sections are play-throughs
-// and don't count. joined: chunks that have entered the song.
-export function songState(sections, target) {
-	const chunks = sections.filter((m) => (m.kind ?? 'chunk') !== 'run');
-	const joined = chunks.filter((m) => m.joined && ownedTempo(m.log ?? []) !== null);
+const capOfTempo = (tempo, ceiling) =>
+	tempo === null ? ceiling : Math.min(ceiling, Math.max(Math.round(tempo * CEILING), tempo + 1));
+
+function lowestJoined(chunks, cap) {
 	let tempo = null;
 	let bottleneck = null;
-	for (const m of joined) {
-		const o = ownedTempo(m.log ?? []);
-		if (tempo === null || o < tempo) {
+	for (const m of chunks) {
+		if (!m.joined) continue;
+		const o = ownedTempo(m.log ?? [], cap);
+		if (o !== null && (tempo === null || o < tempo)) {
 			tempo = o;
 			bottleneck = m;
 		}
 	}
-	const ceiling = target ? Math.round(target * CEILING) : MAX_BPM;
-	const cap = tempo === null ? ceiling : Math.min(ceiling, Math.max(Math.round(tempo * CEILING), tempo + 1));
-	return { tempo, bottleneck, cap, ceiling, pct: tempo && target ? Math.round((tempo / target) * 100) : null };
+	return { tempo, bottleneck };
 }
+
+// sections: the routine's sections; kind 'run' sections are play-throughs
+// and don't count. joined: chunks that have entered the song.
+// Cold checks depend on the cap and the cap on the song tempo, so the song
+// tempo is found in two passes: owned tempos checked against the ceiling
+// give `checkCap` (the joined chunks' cap for cold checks), and owned tempos
+// checked against checkCap give the song tempo and the climbing `cap`.
+export function songState(sections, target) {
+	const chunks = sections.filter((m) => (m.kind ?? 'chunk') !== 'run');
+	const ceiling = target ? Math.round(target * CEILING) : MAX_BPM;
+	const first = lowestJoined(chunks, ceiling);
+	const checkCap = capOfTempo(first.tempo, ceiling);
+	const { tempo, bottleneck } = first.tempo === null ? first : lowestJoined(chunks, checkCap);
+	const cap = capOfTempo(tempo, ceiling);
+	return { tempo, bottleneck, cap, ceiling, checkCap, pct: tempo && target ? Math.round((tempo / target) * 100) : null };
+}
+
+// The cap a chunk's cold checks are measured against.
+export const checkCapFor = (section, song) => (section.joined ? (song.checkCap ?? song.cap) : song.ceiling);
 
 // A chunk joins the song once its owned tempo reaches the song tempo
 // (the first chunk to own a tempo starts the song). Returns true if it
 // should be marked joined now.
 export function shouldJoin(section, song) {
 	if (section.joined || (section.kind ?? 'chunk') === 'run') return false;
-	const o = ownedTempo(section.log ?? []);
+	const o = ownedTempo(section.log ?? [], song.ceiling);
 	return o !== null && (song.tempo === null || o >= song.tempo);
 }
 
@@ -228,8 +247,9 @@ export function chunkStatus(section, song, now = Date.now()) {
 	const log = section.log ?? [];
 	const today = dayKey(now);
 	const run = (section.kind ?? 'chunk') === 'run';
-	const owned = ownedTempo(log);
-	const review = run ? null : nextReview(log); // runs are never due
+	const cc = checkCapFor(section, song);
+	const owned = ownedTempo(log, cc);
+	const review = run ? null : nextReview(log, cc); // runs are never due
 	let state = 'new';
 	if (run) state = 'run';
 	else if (section.joined) state = song.bottleneck === section ? 'bottleneck' : 'joined';
@@ -237,7 +257,7 @@ export function chunkStatus(section, song, now = Date.now()) {
 		state,
 		owned,
 		band: band(log),
-		due: review !== null && review <= today && !coldDoneToday(log, now),
+		due: review !== null && review <= today && !coldDoneToday(log, now, cc),
 		review,
 		plateau: plateau(log),
 		attempts: log.length,
@@ -251,7 +271,7 @@ const capFor = (section, song) => (section.joined ? song.cap : song.ceiling);
 // the chunk's current tempo. Owned tempo then rises with a one-day lag.
 export function sessionStart(section, song, now = Date.now()) {
 	const log = section.log ?? [];
-	const start = previousTop(log, dayKey(now)) || ownedTempo(log) || section.startBPM;
+	const start = previousTop(log, dayKey(now)) || ownedTempo(log, checkCapFor(section, song)) || section.startBPM;
 	return Math.min(start, capFor(section, song));
 }
 
@@ -261,17 +281,27 @@ export function sessionStart(section, song, now = Date.now()) {
 //   join: true when the chunk should be marked joined now
 // Cold ✓ keeps climbing through the ladder; a cold ✗ drops the working
 // tempo to max(owned, stepDown(probe)).
+//   warmup: true when the attempt was a warm-up (below the cold threshold
+//   before today's cold check): recorded, but no ladder action.
 export function nextStep(section, sections, target, attempt) {
-	if ((section.kind ?? 'chunk') === 'run') return { action: null, to: attempt.bpm, join: false };
+	if ((section.kind ?? 'chunk') === 'run') return { action: null, to: attempt.bpm, join: false, owned: null };
 	const log = section.log ?? [];
 	const song = songState(sections, target);
 	const cap = capFor(section, song);
+	const cc = checkCapFor(section, song);
+	const owned = ownedTempo(log, cc);
+	const today = dayKey(attempt.t);
+	const cold = coldAttempts(log, cc).find((c) => c.day === today);
+	const min = coldThreshold(log, today, cc);
+	if (min !== null && attempt.bpm < min && (!cold || cold.t > attempt.t)) {
+		return { action: null, to: attempt.bpm, join: false, warmup: true, owned };
+	}
 	let r;
-	if (attempt.k === 'f' && isColdAttempt(log, attempt)) {
-		const to = Math.min(cap, Math.max(ownedTempo(log) ?? MIN_BPM, stepDown(attempt.bpm)));
+	if (attempt.k === 'f' && cold?.id === attempt.id) {
+		const to = Math.min(cap, Math.max(owned ?? MIN_BPM, stepDown(attempt.bpm)));
 		r = to === attempt.bpm ? { action: null, to } : { action: 'cold-miss', to };
 	} else {
 		r = ladder(log, attempt.bpm, cap);
 	}
-	return { ...r, join: shouldJoin(section, song) };
+	return { ...r, join: shouldJoin(section, song), owned };
 }
