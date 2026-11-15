@@ -1,5 +1,8 @@
 // ============================================================
-// api/auth/[...path].js — same-origin proxy to Neon Auth.
+// api/auth-proxy.js — same-origin proxy to Neon Auth.
+//
+// vercel.json rewrites /api/auth/<path> here as ?__path=<path> (catch-all
+// file names like [...path].js only match one segment outside Next.js).
 //
 // Why: Neon Auth only trusts the origin http://localhost:5173. Any other
 // Origin (e.g. the Vercel URL) gets 403 INVALID_ORIGIN, and we can't
@@ -14,7 +17,8 @@
 //
 // REMOVE THIS PROXY once the production domain is added to Neon Auth's
 // trusted domains (Neon console → Auth → Configuration → Domains): delete
-// this file and the `useProxy` branch in src/db.js. See README.md.
+// this file, its rewrite in vercel.json, and the `useProxy` branch in
+// src/db.js. See README.md.
 // ============================================================
 
 const UPSTREAM_ORIGIN = 'http://localhost:5173';
@@ -86,8 +90,16 @@ export async function proxy(request, upstreamBase = process.env.NEON_AUTH_URL) {
 	}
 
 	const url = new URL(request.url);
-	// /api/auth/sign-in/email?x=1 → <upstream>/sign-in/email?x=1
-	const subPath = url.pathname.replace(/^\/api\/auth/, '');
+	// /api/auth/sign-in/email?x=1 → <upstream>/sign-in/email?x=1. The
+	// rewrite hands the sub-path over as ?__path=; fall back to the
+	// pathname in case the platform passes the original URL through.
+	let subPath;
+	if (url.searchParams.has('__path')) {
+		subPath = '/' + url.searchParams.get('__path').replace(/^\/+/, '');
+		url.searchParams.delete('__path');
+	} else {
+		subPath = url.pathname.replace(/^\/api\/auth(-proxy)?/, '');
+	}
 	const target = upstreamBase.replace(/\/$/, '') + subPath + url.search;
 
 	const headers = new Headers();
