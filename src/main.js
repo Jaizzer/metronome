@@ -1287,12 +1287,20 @@ function updatePlayerUI() {
 // The stop strip: one dot per section while they fit (about 28px each);
 // longer routines get "Section n / N" and a thin bar instead, so nothing in
 // the player is wider than the screen. Prev / Next stay in the transport.
-const STOP_MIN_PX = 28;
+const STOP_MIN_PX = 28; // 24px dot + a short connecting line
+let stopsRecheck = 0;
 function renderStops() {
 	if (!activePractice || activeMetIndex < 0) return;
 	const list = activePractice.metronomes;
-	const width = $('stops').parentElement.clientWidth || innerWidth;
-	const compact = list.length > Math.max(2, Math.floor(width / STOP_MIN_PX));
+	const width = $('stops').parentElement.clientWidth;
+	// Not laid out yet (player just shown): decide again on the next frame.
+	if (!width) {
+		cancelAnimationFrame(stopsRecheck);
+		stopsRecheck = requestAnimationFrame(renderStops);
+	}
+	// Every dot needs STOP_MIN_PX, plus a little for the larger current dot.
+	const compact = !width ? list.length > 12 : list.length * STOP_MIN_PX + 8 > width;
+	if (!compact) renderStopDots(list);
 	$('stops').hidden = compact;
 	$('stops-compact').hidden = !compact;
 	if (compact) {
@@ -1302,8 +1310,10 @@ function renderStops() {
 		$('stops-done').style.width = `${(activeMetIndex / n) * 100}%`;
 		$('stops-cur').style.left = `${(activeMetIndex / n) * 100}%`;
 		$('stops-cur').style.width = `${100 / n}%`;
-		return;
 	}
+}
+
+function renderStopDots(list) {
 	$('stops').replaceChildren(
 		...list.map((m, i) =>
 			h(
