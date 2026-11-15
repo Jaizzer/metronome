@@ -2133,6 +2133,8 @@ function renderBuilder({ keepFocus = false } = {}) {
 	let focusSelector = null;
 	if (cls && sec) focusSelector = `.sec[data-pidx="${sec.dataset.pidx}"][data-midx="${sec.dataset.midx}"] .${cls}`;
 	else if (cls && routine) focusSelector = `.routine[data-pidx="${routine.dataset.pidx}"] .${cls}`;
+	// Same class twice in one place (Chunk | Run): come back to the same one.
+	const focusIndex = focusSelector ? [...document.querySelectorAll(focusSelector)].indexOf(active) : -1;
 
 	renderAlltime();
 	const app = $('app');
@@ -2151,7 +2153,10 @@ function renderBuilder({ keepFocus = false } = {}) {
 	}
 	renderRecordBar();
 	applyRoutineView();
-	if (focusSelector) document.querySelector(focusSelector)?.focus({ preventScroll: routineView === 'slide' });
+	if (focusSelector) {
+		const matches = document.querySelectorAll(focusSelector);
+		(matches[Math.max(0, focusIndex)] ?? matches[0])?.focus({ preventScroll: routineView === 'slide' });
+	}
 }
 
 // ---------------- Routine layout: vertical list or one-per-screen slides ----------------
