@@ -1,0 +1,44 @@
+# Takes: auto-recorded practice audio (plan, agreed 2026-11-15)
+
+Status: planned, not built. Owner approved the design; build starts on "go".
+
+## What the player does
+- Toggle **Record takes** in the player. Each section records on its own while it plays (click included, so timing is audible). Pause pauses the take; section end / skip / Exit saves it. Takes under 3 s are dropped.
+- **● REC** chip in amber (red means ✗ in this app).
+- Section rows: **Takes (n)** → dialog: play/pause, seek, time, prev/next take, 0.75×/1×, ⭐ keep, delete, Save/Share.
+
+## Audio
+- `getUserMedia` with echoCancellation/noiseSuppression/autoGainControl **off** (guitar).
+- `MediaRecorder` at 64 kbps: `audio/mp4` on Safari, `audio/webm;codecs=opus` elsewhere. ≈ 0.48 MB/min, ≈ 25 MB on an average practice day.
+- Chunks every 1 s into IndexedDB, so a take cut short by a crash or dead battery is recovered on next open, marked "(cut short)".
+
+## Storage: device first, then the Mac
+```
+iPad / phone (app)  ──HTTPS over Tailscale──>  Mac: Node server (launchd, KeepAlive)
+  IndexedDB copy + outbox                         ├─ ~/MetronomeTakes/                       every take
+                                                  └─ iCloud Drive/Metronome Keepers/          ⭐ takes (macOS syncs)
+```
+- Take record: `{ id, userId, routineId, sectionId, section, bpm, recordedAt, durationMs, mime, starred, sha256, audio }`.
+- **Outbox** (pending → uploading → done). Retries on: app open, `visibilitychange`, `online`, every 60 s while open, after each take, **Sync now**. `GET /health` first.
+- **Resumable uploads**: 512 KB chunks; `HEAD /takes/:id` returns the received offset; resume from there. Take id makes retries idempotent. The device copy is deleted only after the server confirms the sha256.
+- Status chip: `Mac ● online` / `Mac ○ offline · n takes waiting`.
+- Playback: device copy if present (instant, offline); else stream from the Mac with HTTP Range; cache after first play.
+
+## Mac server
+- Node, one folder per routine/section, JSON index. Endpoints: `/health`, `PUT/HEAD /takes/:id` (chunked), `GET /takes?section=` , `GET /takes/:id/audio` (Range), `PATCH /takes/:id` (star), `DELETE /takes/:id`.
+- Private: reachable only over **Tailscale** (`tailscale serve` HTTPS); plus a bearer token. Never exposed publicly.
+- launchd agent: RunAtLoad + KeepAlive; `caffeinate -s` so the Mac doesn't system-sleep on AC power (display sleep still allowed). `pmset autorestart` if the model supports it.
+- On start: copy any ⭐ take missing from the iCloud Keepers folder.
+- Retention: delete unstarred takes older than 6 months (≈ 4–5 GB on disk). ⭐ kept forever.
+
+## When the Mac is off
+Recording, device copies and same-device playback keep working; uploads and cross-device playback wait and resume automatically.
+
+## Cost
+₱0: browser APIs, Tailscale free personal plan, Mac disk, iCloud for keepers only (≈ 10–30 MB/month).
+
+## Build order
+1. Recording + device copy + crash recovery + Takes dialog + ⭐ (app only).
+2. Mac server + launchd.
+3. Tailscale + HTTPS.
+4. Outbox sync, resumable uploads, streaming, iCloud keepers, status chip.
