@@ -76,7 +76,14 @@ body {
 	color: var(--on-ink);
 }
 
-:focus-visible {
+/* Buttons get the ring on any focus, not only when the browser guesses
+   "keyboard": mouse/touch clicks blur them (main.js), so a ring only stays
+   for keyboard or programmatic focus. */
+:focus-visible,
+button:focus,
+[role='button']:focus,
+[role='switch']:focus,
+[role='slider']:focus {
 	outline: 3px solid var(--amber);
 	outline-offset: 2px;
 }
