@@ -15,7 +15,7 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Player: Tab disclosure (`src/tabpanel.js`), Hear it (pauses the click), "not on this device" + re-attach
 - [x] Harness flows (MusicXML + text + paste + bad file), screenshots 390/1280, pedal focus checks, old harness scripts
 - [x] README, DESIGN.md
-- [ ] Deploy check (Vercel production + 200)
+- [x] Deploy check (Vercel production 4dcc806: success, URL 200, site loads without errors; production build re-tested with the harness flows)
 
 **Built (as decided 2026-11-15)**
 - Library: alphaTab 1.9.0, imported only by `src/tabview.js`, which only `src/tabload.js` loads (dynamic import), so it is a separate chunk; its worker/worklet go through `@coderline/alphatab-vite`; Bravura and the SONiVOX soundfont are `?url` imports, fetched only when a tab is drawn / Hear it is pressed. The "♪ alphaTab.net" attribution is never hidden.
