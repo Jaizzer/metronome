@@ -1706,6 +1706,32 @@ function clampBPM(v, fallback) {
 let openSectionId = null;
 const openOptions = new Set();
 
+// Long routines show a window of parts; "Show all" is remembered per device.
+const LONG_ROUTINE = 8;
+const WINDOW_ROWS = 6;
+const EXPANDED_KEY = 'metronome:expanded-routines';
+const expandedRoutines = new Set(lsGet(EXPANDED_KEY) ?? []);
+function setExpanded(p, on) {
+	if (on) expandedRoutines.add(p.id);
+	else expandedRoutines.delete(p.id);
+	try {
+		localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expandedRoutines]));
+	} catch {
+		// private mode: just not remembered
+	}
+	renderBuilder();
+}
+
+// The rows a long routine shows: around the open or selected part.
+function visibleRows(p) {
+	const n = p.metronomes.length;
+	if (n <= LONG_ROUTINE || expandedRoutines.has(p.id)) return { from: 0, to: n };
+	let focus = p.metronomes.findIndex((m) => m.id === openSectionId);
+	if (focus < 0 && p.id === selectedPracticeId) focus = p.metronomes.indexOf(selectedSection);
+	const from = Math.max(0, Math.min(Math.max(focus, 0) - 2, n - WINDOW_ROWS));
+	return { from, to: Math.min(n, from + WINDOW_ROWS) };
+}
+
 const STATE_LABEL = { new: '○ New', joined: '● Joined', bottleneck: '▼ Bottleneck', run: '→ Run' };
 
 function shortDate(key) {
@@ -1987,7 +2013,18 @@ function renderSection(p, pIdx, m, mIdx, song = null) {
 		fields,
 		h('p', { class: 'sec-tally' }, 'Runs', tallyInline(st)),
 		cs && songDetailsEl(p, m, cs),
-		h('div', { class: 'sec-actions' }, grip, remove),
+		h(
+			'div',
+			{ class: 'sec-actions' },
+			h(
+				'button',
+				{ class: 'btn btn-quiet start-here', type: 'button', onclick: () => startRoutine(p, mIdx) },
+				iconEl('play'),
+				'Start here',
+			),
+			grip,
+			remove,
+		),
 	);
 
 	li.append(head, panel);
@@ -2162,7 +2199,18 @@ function renderRoutine(p, pIdx) {
 					renderRecordBar();
 				},
 			}),
-			optsBtn,
+			h(
+				'div',
+				{ class: 'head-actions' },
+				n > LONG_ROUTINE &&
+					h(
+						'button',
+						{ class: 'btn btn-primary head-start', type: 'button', onclick: () => startRoutine(p) },
+						iconEl('play'),
+						'Start',
+					),
+				optsBtn,
+			),
 			h(
 				'p',
 				{ class: 'routine-meta' },
@@ -2172,7 +2220,26 @@ function renderRoutine(p, pIdx) {
 			songOn && songSummary(p, song),
 			options,
 		),
-		h('ol', { class: 'sections' }, p.metronomes.map((m, mIdx) => renderSection(p, pIdx, m, mIdx, song))),
+		(() => {
+			const { from, to } = visibleRows(p);
+			const rows = p.metronomes.slice(from, to).map((m, i) => renderSection(p, pIdx, m, from + i, song));
+			return h('ol', { class: 'sections', start: String(from + 1) }, rows);
+		})(),
+		n > LONG_ROUTINE &&
+			(() => {
+				const { from, to } = visibleRows(p);
+				const all = expandedRoutines.has(p.id);
+				return h(
+					'div',
+					{ class: 'sec-more' },
+					!all && h('span', { class: 'sec-more-note' }, `Parts ${from + 1}–${to} of ${n}`),
+					h(
+						'button',
+						{ class: 'btn btn-quiet', type: 'button', 'aria-expanded': String(all), onclick: () => setExpanded(p, !all) },
+						all ? 'Show fewer' : `Show all ${n} parts`,
+					),
+				);
+			})(),
 		h(
 			'div',
 			{ class: 'routine-actions' },

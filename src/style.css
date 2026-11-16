@@ -451,6 +451,32 @@ input[type='number']::-webkit-outer-spin-button {
 	border-top: 2px solid var(--rule);
 }
 
+.head-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--s2);
+}
+
+.head-start {
+	padding: 0 var(--s3);
+	font-size: 14px;
+}
+
+.sec-more {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--s2);
+	padding: var(--s2) 0;
+	border-top: 1px solid var(--rule);
+	color: var(--paper-2);
+	font-size: 14px;
+}
+
+.sec-actions .start-here {
+	margin-right: auto;
+}
+
 .routine-head {
 	display: grid;
 	grid-template-columns: 1fr auto;
