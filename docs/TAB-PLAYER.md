@@ -21,7 +21,7 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Review round 1 deploy check (Vercel production e2f8e0a: success, URL 200, no console errors; tabplayer.mjs 147 checks pass on a production build)
 - [x] Review round 2 MAJOR: Open full tab from a far section stays there (alphaTab's forced scroll to its stale bar-1 cursor on ready/pause is ignored while the opening section is shown; following is a custom scroll handler, only while playing); the selected chip is scrolled into its row (harness: 400-bar file, Part 38 · bars 301–304, after 3 s bars 301–304 and the chip on screen; play + pause keeps the cursor in view)
 - [x] Review round 2 minors: toast over the score under the chips (measured); `Loading…` text-only fits at 360; pending-start hint `Pending start · tap a bar or press ] to select up to it`; DESIGN.md / this file corrected
-- [ ] Review round 2 deploy check
+- [x] Review round 2 deploy check (Vercel production d4e315c: success, URL 200, no console errors; tabplayer.mjs 153 checks pass on a production build)
 
 ## Known limits
 
