@@ -1648,6 +1648,11 @@ input[type='range']:focus-visible {
 	text-overflow: ellipsis;
 }
 
+/* The Tab player's top bar (Exit, bar count) stays uncovered. */
+body[data-view='tabplayer'] .toast {
+	top: calc(max(var(--s3), env(safe-area-inset-top)) + 64px);
+}
+
 .toast.show {
 	transform: translate(-50%, 0);
 	visibility: visible;

@@ -30,6 +30,7 @@ import {
 	insertIndex,
 	newChunkSection,
 	selectionLabel,
+	shortName,
 	barAtTick,
 	barStartTick,
 	selectionTicks,
@@ -40,6 +41,7 @@ import {
 
 const PREFS_KEY = 'metronome:tabplayer';
 const PLAYING = 1; // alphaTab.synth.PlayerState.Playing
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function loadPrefs() {
 	try {
@@ -61,6 +63,7 @@ function savePrefs(prefs) {
 // opts: {
 //   p: the routine, root: the view's main element, posEl: the header's bar count,
 //   source: Promise<tab source | null> (null = not on this device),
+//   initialBars: [start, end] to select on open (the player's section) or null,
 //   toast, confirm, pickFile(), beforePlay(), practice(sectionIndex),
 //   makeId(), insertSection(section, index) (adds it to the routine and saves)
 // }
@@ -145,9 +148,9 @@ export function createTabPlayer(opts) {
 	}
 
 	function renderPlay() {
-		const label = !ready ? 'Loading sound…' : playing ? 'Pause' : 'Play';
+		const label = !ready ? 'Loading…' : playing ? 'Pause' : 'Play';
+		// The label says what a press does (no aria-pressed: "Pause" alone is read).
 		el.play.replaceChildren(iconEl(playing ? 'pause' : 'play'), label);
-		el.play.setAttribute('aria-pressed', String(playing));
 		el.play.disabled = !ready;
 		el.stop.disabled = !ready;
 	}
@@ -183,7 +186,7 @@ export function createTabPlayer(opts) {
 						title: `${c.name} (${barRange(c.start, c.end)})`,
 						onclick: () => {
 							setPos(selectBars(c.start, c.end));
-							api?.scrollToCursor();
+							scrollToBar(c.start);
 						},
 					},
 					c.name,
@@ -198,7 +201,7 @@ export function createTabPlayer(opts) {
 		if (sel) {
 			const i = matchSection(p.metronomes, sel);
 			const m = p.metronomes[i];
-			el.selLabel.replaceChildren(h('b', {}, selectionLabel(sel)), m ? ` · ${m.name}` : '');
+			el.selLabel.replaceChildren(h('b', {}, selectionLabel(sel)), m ? ` · ${shortName(m.name)}` : '');
 			if (m) {
 				actions.push(
 					h('button', { class: 'btn', type: 'button', id: 'tp-practice', onclick: () => practice(i) }, iconEl('metronome'), (m.kind ?? 'chunk') === 'run' ? 'Practice the full run' : 'Practice this chunk'),
@@ -309,6 +312,19 @@ export function createTabPlayer(opts) {
 
 	// ---------- Position, range and seeking ----------
 
+	// Bring a bar into view in the score (we scroll ourselves: alphaTab's
+	// scrollToCursor would still use the cursor from before the seek).
+	function scrollToBar(bar) {
+		const b = api?.renderer?.boundsLookup?.findMasterBarByIndex(bar - 1);
+		const surf = surface();
+		if (!b || !surf) return;
+		const top = surf.getBoundingClientRect().top - scoreEl.getBoundingClientRect().top + scoreEl.scrollTop + b.visualBounds.y;
+		const bottom = top + b.visualBounds.h;
+		const view = scoreEl.scrollTop;
+		if (top >= view && bottom <= view + scoreEl.clientHeight) return;
+		scoreEl.scrollTo({ top: Math.max(0, top - 24), behavior: 'auto' });
+	}
+
 	function setPos(next, { seek = true } = {}) {
 		const selChanged = next.sel?.start !== pos.sel?.start || next.sel?.end !== pos.sel?.end;
 		pos = next;
@@ -377,12 +393,12 @@ export function createTabPlayer(opts) {
 		if (!api || !ready) return;
 		api.stop();
 		setPos({ ...pos, cursor: stopBar(pos, playedFrom), anchor: null });
-		api.scrollToCursor();
+		scrollToBar(pos.cursor);
 	}
 
 	function move(delta) {
 		setPos(moveCursor(pos, delta, total));
-		api?.scrollToCursor();
+		scrollToBar(pos.cursor);
 	}
 
 	function practice(index) {
@@ -433,6 +449,8 @@ export function createTabPlayer(opts) {
 		s.player.scrollMode = alphaTab.ScrollMode.Continuous;
 		s.player.scrollElement = scoreEl;
 		s.player.scrollOffsetY = -24;
+		if (reduceMotion()) s.player.scrollSpeed = 0; // jump, don't glide
+		host.dataset.scrollSpeed = String(s.player.scrollSpeed); // read by the harness
 		s.display.staveProfile = profileFor(score, track);
 		api = new alphaTab.AlphaTabApi(host, s);
 		host.append(marks);
@@ -443,11 +461,15 @@ export function createTabPlayer(opts) {
 			return b && r ? { x: r.left + b.realBounds.x, y: r.top + b.visualBounds.y, w: b.realBounds.w, h: b.visualBounds.h } : null;
 		};
 
+		let firstDraw = true;
 		api.renderFinished.on(() => {
 			if (my !== token) return;
 			setStatus('');
 			host.dataset.rendered = 'true';
 			drawMarks();
+			// Opened from a section: show its bars.
+			if (firstDraw && pos.sel) requestAnimationFrame(() => my === token && scrollToBar(pos.sel.start));
+			firstDraw = false;
 		});
 		api.error.on((e) => {
 			if (my !== token) return;
@@ -554,7 +576,8 @@ export function createTabPlayer(opts) {
 		track = src.track ?? 0;
 		fileBars = sourceBars(src, track);
 		total = score.masterBars.length;
-		pos = position(1);
+		const [a, b] = opts.initialBars ?? [];
+		pos = a >= 1 && b >= a && b <= total ? selectBars(a, b) : position(1);
 		renderTracks();
 		renderPos();
 		renderSpeed();

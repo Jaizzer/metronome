@@ -469,6 +469,7 @@ let view = 'auth';
 
 function showView(name) {
 	view = name;
+	document.body.dataset.view = name; // the toast sits under the Tab player's header
 	for (const v of VIEWS) $(v).hidden = v !== name;
 	window.scrollTo(0, 0);
 }
@@ -2399,7 +2400,8 @@ const importer = createImporter({
 const tabPanel = createTabPanel({
 	toast,
 	confirm: confirmDialog,
-	openFull: () => activePractice && openTabPlayer(activePractice),
+	// From a section: the Tab player opens with that section's bars selected.
+	openFull: () => activePractice && openTabPlayer(activePractice, activePractice.metronomes[activeMetIndex]?.bars ?? null),
 	attached: (p) => {
 		if (view === 'tabplayer' && tabPlayerFor === p) tabPlayer?.reload();
 	},
@@ -2433,7 +2435,7 @@ function pauseClickForTab() {
 	}
 }
 
-async function openTabPlayer(p) {
+async function openTabPlayer(p, initialBars = null) {
 	if (view === 'tabplayer') return;
 	const my = ++tabPlayerToken;
 	tabPlayerFrom = view === 'player' ? 'player' : 'builder';
@@ -2462,6 +2464,7 @@ async function openTabPlayer(p) {
 		root: $('tp-main'),
 		posEl: $('tp-pos'),
 		source: () => tabPanel.sourceFor(p),
+		initialBars,
 		toast,
 		confirm: confirmDialog,
 		pickFile: () => tabPanel.pickFile(p),
