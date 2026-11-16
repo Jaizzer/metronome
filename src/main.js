@@ -469,7 +469,6 @@ let view = 'auth';
 
 function showView(name) {
 	view = name;
-	document.body.dataset.view = name; // the toast sits under the Tab player's header
 	for (const v of VIEWS) $(v).hidden = v !== name;
 	window.scrollTo(0, 0);
 }
@@ -479,6 +478,14 @@ let toastTimer = null;
 function toast(content, kind = '', ms = 1400) {
 	const el = $('toast');
 	el.className = `toast ${kind}`;
+	// In the Tab player it sits over the score, under the top bar and the
+	// chips / Tracks row, so Exit and the chips stay uncovered.
+	let top = '';
+	if (view === 'tabplayer') {
+		const bottoms = ['#tabplayer .player-top', '#tabplayer .tp-top'].map((s) => document.querySelector(s)?.getBoundingClientRect()).filter((r) => r && r.height > 0).map((r) => r.bottom);
+		if (bottoms.length) top = `${Math.round(Math.max(...bottoms) + 8)}px`;
+	}
+	el.style.top = top;
 	el.replaceChildren(content instanceof Node ? content : document.createTextNode(content));
 	void el.offsetWidth; // restart the slide-in
 	el.classList.add('show');
