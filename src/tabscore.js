@@ -110,12 +110,12 @@ export function fileStatesTempo(format, rawText, score) {
 	return (score?.tempo ?? 120) !== 120;
 }
 
-// The MIDI ticks to play for bars [start, end] (1-based), from alphaTab's
-// tick lookup: `played` lists the bars in playing order with repeats
-// expanded ([{ index (0-based master bar), start, end }]). Uses the FIRST
-// time the range is played straight through; a seam ends one beat into its
-// second bar (`beatTicks`). Null when the bars are never played.
-export function playedRange(played, start, end, { seam = false, beatTicks = 960 } = {}) {
+// Where bars [start, end] (1-based) are played: indexes into `played`
+// (alphaTab's bars in playing order, repeats expanded:
+// [{ index (0-based master bar), start, end }]) of the start and end bar of
+// the FIRST pass that plays them straight through, else the first start
+// bar and the first end bar after it. Null when they're never played.
+function findPass(played, start, end) {
 	const a = start - 1;
 	const z = end - 1;
 	const len = z - a + 1;
@@ -127,16 +127,54 @@ export function playedRange(played, start, end, { seam = false, beatTicks = 960 
 				break;
 			}
 		}
-		if (!ok) continue;
-		const last = played[i + len - 1];
-		return { startTick: played[i].start, endTick: seam ? last.start + beatTicks : last.end };
+		if (ok) return [i, i + len - 1];
 	}
-	// Never played straight through (a jump inside the range): first start → first end after it.
 	const i = played.findIndex((p) => p.index === a);
 	if (i < 0) return null;
 	const j = played.findIndex((p, k) => k >= i && p.index === z);
-	if (j < 0) return null;
+	return j < 0 ? null : [i, j];
+}
+
+// The MIDI ticks to play for bars [start, end] (1-based), from alphaTab's
+// tick lookup (see findPass). Uses the FIRST time the range is played
+// straight through; a seam ends one beat into its second bar (`beatTicks`).
+// Null when the bars are never played.
+export function playedRange(played, start, end, { seam = false, beatTicks = 960 } = {}) {
+	const pass = findPass(played, start, end);
+	if (!pass) return null;
+	const [i, j] = pass;
 	return { startTick: played[i].start, endTick: seam ? played[j].start + beatTicks : played[j].end };
+}
+
+// The ticks of a selection or section: bars { start, end } or a beat range
+// (docs/TAB-PRACTICE.md): range.start.tick / range.end.tick are offsets
+// from the start of its first / last bar, in the same pass as playedRange.
+export function playedSpan(played, sel, opts) {
+	if (!sel) return null;
+	if (!sel.range) return playedRange(played, sel.start, sel.end, opts);
+	const { start, end } = sel.range;
+	const pass = findPass(played, start.bar, end.bar);
+	if (!pass) return null;
+	const [i, j] = pass;
+	return { startTick: played[i].start + start.tick, endTick: played[j].start + end.tick };
+}
+
+// Every beat (note, chord or rest; no grace notes) of one track's first
+// voice, in score order, as beat points { bar, beat, tick, end }: bar and
+// beat 1-based, tick / end = ticks from the bar's start to where the beat
+// starts / ends. `beatRef` keeps alphaTab's Beat (for its drawn bounds).
+export function beatPoints(score, trackIndex = 0) {
+	const staff = score?.tracks?.[trackIndex]?.staves?.[0];
+	const out = [];
+	(staff?.bars ?? []).forEach((bar, i) => {
+		let n = 0;
+		for (const b of bar.voices?.[0]?.beats ?? []) {
+			if (b.graceType) continue;
+			const tick = b.playbackStart ?? 0;
+			out.push({ bar: i + 1, beat: ++n, tick, end: tick + (b.playbackDuration ?? 0), beatRef: b });
+		}
+	});
+	return out;
 }
 
 // alphaTab's MidiTickLookup → the `played` list above.

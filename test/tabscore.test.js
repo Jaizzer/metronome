@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as alphaTab from '@coderline/alphatab/core';
-import { barsFromScore, trackList, defaultTrack, scoreTitle, playedRange, playedBars, fileStatesTempo } from '../src/tabscore.js';
+import { barsFromScore, trackList, defaultTrack, scoreTitle, playedRange, playedSpan, playedBars, beatPoints, fileStatesTempo } from '../src/tabscore.js';
 import { planChunks, buildSections, targetTempo } from '../src/slicer.js';
 
 alphaTab.Logger.logLevel = alphaTab.LogLevel.None; // the bad-file test would log an error
@@ -84,6 +84,29 @@ test('played ranges with a repeat: the first time the bars are played', () => {
 	assert.deepEqual(playedRange(jumpy, 1, 3), { startTick: 0, endTick: 20 });
 	// The written start of bar 5 would have been wrong:
 	assert.equal(score.masterBars[4].start, 4 * 3840);
+});
+
+test('beat points and beat spans on the real fixtures (repeats)', () => {
+	const etude = load('etude.musicxml');
+	const pts = beatPoints(etude, 0);
+	const inBar = (n) => pts.filter((p) => p.bar === n);
+	assert.deepEqual(inBar(1).map((p) => [p.beat, p.tick, p.end]), [[1, 0, 960], [2, 960, 1920], [3, 1920, 2880], [4, 2880, 3840]]);
+	assert.equal(inBar(7).length, 16);
+	assert.deepEqual(inBar(2).map((p) => p.end - p.tick), [960, 960, 1920]); // q q rest(half)
+	assert.ok(pts.every((p) => p.beatRef));
+	const range = { start: { bar: 5, beat: 3, tick: 1920 }, end: { bar: 7, beat: 2, tick: 480 } };
+	assert.deepEqual(playedSpan(played(etude), { start: 5, end: 7, range }), { startTick: 4 * 3840 + 1920, endTick: 6 * 3840 + 480 });
+	// Repeat fixture: 1 2 3 4 3 4 5 6 7 8.
+	const rep = load('repeat.musicxml');
+	const list = played(rep);
+	// 4 → 5 is straight through only on the second pass (played bars 6–7).
+	const r45 = { start: { bar: 4, beat: 2, tick: 960 }, end: { bar: 5, beat: 1, tick: 960 } };
+	assert.deepEqual(playedSpan(list, { start: 4, end: 5, range: r45 }), { startTick: 5 * 3840 + 960, endTick: 6 * 3840 + 960 });
+	// 3 → 4 on the first pass.
+	const r34 = { start: { bar: 3, beat: 3, tick: 1920 }, end: { bar: 4, beat: 2, tick: 1920 } };
+	assert.deepEqual(playedSpan(list, { start: 3, end: 4, range: r34 }), { startTick: 2 * 3840 + 1920, endTick: 3 * 3840 + 1920 });
+	assert.deepEqual(playedSpan(list, { start: 5, end: 6 }), playedRange(list, 5, 6));
+	assert.equal(playedSpan(list, null), null);
 });
 
 test('tempo stated in the file or not', () => {

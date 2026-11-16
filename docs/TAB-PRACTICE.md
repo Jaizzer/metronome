@@ -5,7 +5,7 @@
 Running checklist so work can resume after an interruption (update it with every commit).
 
 - [x] Spec (this file)
-- [ ] Pure rules + unit tests: pedal target, speed lock, beat points/ranges ↔ ticks (repeats), labels, durations from ticks, chunks with `range`
+- [x] Pure rules + unit tests: pedal target, speed lock, beat points/ranges ↔ ticks (repeats), labels, durations from ticks, chunks with `range`
 - [ ] 5a in the view: pedal ✓/✗/undo records in the Tab player (target captured at press), record line, speed lock + Free speed, live ladder speed + toast + tone, Click only
 - [ ] 5b in the view: beat taps, second tap, mouse drag, handles (drag), Shift+← / Shift+→, bar-number taps stay bar-level, beat-level highlight, Add as a new chunk saves `range`
 - [ ] Beat-level chunks elsewhere: chips, Practice this chunk, Open full tab, Tab panel (touched bars + beat highlight), Hear it (exact ticks), builder details line
