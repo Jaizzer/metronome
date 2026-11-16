@@ -2528,6 +2528,15 @@ function closeTabPlayer({ to = tabPlayerFrom } = {}) {
 	}
 	tabPlayerWake = false;
 	if (to === 'player' && activePractice) {
+		// The Tab player's ladder may have moved this section's tempo:
+		// pick it up before showing the player again (as runSection does).
+		const met = activePractice.metronomes[activeMetIndex];
+		if (met && !isRamping && met.startBPM !== currentBPM) {
+			sectionStartBPM = met.startBPM;
+			sectionEndBPM = met.startBPM;
+			currentBPM = met.startBPM;
+			adjustBPMDisplay();
+		}
 		showView('player');
 		updatePlayerUI();
 		$('player-title').focus();
