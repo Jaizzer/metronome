@@ -270,32 +270,40 @@
 }
 
 .tp-transport {
-	display: flex;
-	flex-wrap: wrap;
+	/* A fixed grid: Play/Pause keeps its width and the bar its height
+	   whatever the label says, so a second tap lands on the same button. */
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	grid-template-areas:
+		'stop play speed'
+		'toggles toggles toggles';
 	align-items: center;
 	gap: var(--s2);
 	padding-top: var(--s2);
 }
 
 .tp-main-ctl {
-	display: flex;
-	gap: var(--s2);
-	flex: 1 1 auto;
+	display: contents;
 }
 
-.tp-main-ctl .btn {
+.tp-stop {
+	grid-area: stop;
 	padding: 0 var(--s3);
 }
 
 .tp-play {
-	flex: 1;
-	min-width: 112px;
+	grid-area: play;
+	min-width: 0;
+	padding: 0 var(--s2);
+	gap: 6px;
+	overflow: hidden;
 }
 
 .tp-speed {
+	grid-area: speed;
 	display: flex;
 	align-items: center;
-	gap: var(--s1);
+	gap: 2px;
 }
 
 .tp-speed .btn-icon {
@@ -311,13 +319,14 @@
 	font-size: 18px;
 	line-height: 1.05;
 	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
 	color: var(--paper);
 }
 
 .tp-toggles {
+	grid-area: toggles;
 	display: flex;
 	gap: var(--s2);
-	flex: 1 1 100%;
 }
 
 .tp-toggle {
@@ -335,15 +344,27 @@
 
 @media (max-width: 420px) {
 	/* "75% · 75 BPM" on two lines so Stop, Play and speed share one row. */
+	.tp-transport {
+		gap: 6px;
+	}
+
+	.tp-stop {
+		padding: 0 10px;
+	}
+
+	.tp-play {
+		padding: 0 6px;
+	}
+
 	.tp-speed-val {
 		min-width: 0;
-		width: 64px;
+		width: 48px;
 		font-size: 16px;
 	}
 
 	.tp-bpm {
 		display: block;
-		font-size: 14px;
+		font-size: 13px;
 		color: var(--paper-2);
 	}
 
@@ -354,32 +375,12 @@
 
 @media (min-width: 900px) {
 	.tp-transport {
-		flex-wrap: nowrap;
-	}
-
-	.tp-main-ctl {
-		flex: 0 0 auto;
-	}
-
-	.tp-play {
-		min-width: 140px;
-	}
-
-	.tp-toggles {
-		flex: 0 0 auto;
-		margin-left: auto;
+		grid-template-columns: auto 160px auto 1fr auto;
+		grid-template-areas: 'stop play speed . toggles';
 	}
 
 	.tp-toggle {
 		flex: 0 0 auto;
 		padding: 0 var(--s3);
-	}
-}
-
-
-@media (max-width: 420px) {
-	/* Stop, Play and the speed share one row. */
-	.tp-play {
-		min-width: 0;
 	}
 }
