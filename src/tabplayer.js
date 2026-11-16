@@ -84,6 +84,7 @@ export function createTabPlayer(opts) {
 	let playing = false;
 	let playedFrom = 1;
 	let pos = position(1);
+	let hold = null; // a bar kept in view while the tab loads (opened from a section)
 	const mute = new Set();
 	const solo = new Set();
 	const el = {}; // controls that get updated
@@ -148,9 +149,10 @@ export function createTabPlayer(opts) {
 	}
 
 	function renderPlay() {
-		const label = !ready ? 'Loading…' : playing ? 'Pause' : 'Play';
 		// The label says what a press does (no aria-pressed: "Pause" alone is read).
-		el.play.replaceChildren(iconEl(playing ? 'pause' : 'play'), label);
+		// While the sound loads it is text only, so it fits at 360px.
+		if (!ready) el.play.replaceChildren('Loading…');
+		else el.play.replaceChildren(iconEl(playing ? 'pause' : 'play'), playing ? 'Pause' : 'Play');
 		el.play.disabled = !ready;
 		el.stop.disabled = !ready;
 	}
@@ -211,12 +213,23 @@ export function createTabPlayer(opts) {
 			}
 			actions.push(h('button', { class: 'btn btn-quiet', type: 'button', id: 'tp-clear', onclick: () => setPos(clearSelection(pos)) }, iconEl('cross'), 'Clear'));
 		} else if (anchor !== null) {
-			el.selLabel.replaceChildren(h('b', {}, `Bar ${anchor}`), ' · tap another bar to select up to it, or this one again');
+			el.selLabel.replaceChildren(h('b', {}, `Bar ${anchor}`), ' · Pending start · tap a bar or press ] to select up to it');
 		} else {
 			el.selLabel.replaceChildren('Tap a bar to start there · tap two to select and loop them');
 		}
 		el.selActions.replaceChildren(...actions);
 		renderChips();
+		showSelectedChip();
+	}
+
+	// Keep the selected chip visible in its scrolling row.
+	function showSelectedChip() {
+		const chip = el.chips.querySelector('.tp-chip[aria-pressed="true"]');
+		if (!chip || el.chips.hidden) return;
+		const row = el.chips;
+		const left = chip.offsetLeft - row.offsetLeft;
+		const right = left + chip.offsetWidth;
+		if (left < row.scrollLeft || right > row.scrollLeft + row.clientWidth) row.scrollLeft = Math.max(0, left - 16);
 	}
 
 	function renderTracks() {
@@ -326,6 +339,7 @@ export function createTabPlayer(opts) {
 	}
 
 	function setPos(next, { seek = true } = {}) {
+		hold = null; // the user moved: stop holding the opening view
 		const selChanged = next.sel?.start !== pos.sel?.start || next.sel?.end !== pos.sel?.end;
 		pos = next;
 		if (selChanged) applyRange();
@@ -382,6 +396,7 @@ export function createTabPlayer(opts) {
 	function toggle() {
 		if (!ready || !api) return;
 		if (playing) return api.pause();
+		hold = null;
 		opts.beforePlay?.();
 		// Outside the selection: start at its first bar.
 		if (pos.sel && (pos.cursor < pos.sel.start || pos.cursor > pos.sel.end)) setPos({ ...pos, cursor: pos.sel.start });
@@ -461,15 +476,52 @@ export function createTabPlayer(opts) {
 			return b && r ? { x: r.left + b.realBounds.x, y: r.top + b.visualBounds.y, w: b.realBounds.w, h: b.visualBounds.h } : null;
 		};
 
-		let firstDraw = true;
+		// Following playback is ours: alphaTab's own handler also scrolls to
+		// its cursor after renders and pauses (bar 1 before the first seek),
+		// which pulled a section opened far down back to the top. This one scrolls
+		// (like ScrollMode.Continuous: when the cursor's system changes) only
+		// while playing; seeks scroll through scrollToBar().
+		let lastY = null;
+		const scrollTo = (bb, force) => {
+			const y = bb.barBounds.masterBarBounds.realBounds.y;
+			if (!force && y === lastY) return;
+			lastY = y;
+			const ui = api.uiFacade;
+			const scroll = ui.getScrollContainer();
+			ui.scrollToY(scroll, ui.getOffset(scroll, api.container).y + y + s.player.scrollOffsetY, s.player.scrollSpeed);
+		};
+		api.customScrollHandler = {
+			[Symbol.dispose]() {},
+			// alphaTab calls this when playback pauses (scrollToCursor), also once
+			// as the player gets ready, with the cursor still on bar 1.
+			forceScrollTo: (bb) => {
+				if (hold === null) scrollTo(bb, true);
+			},
+			onBeatCursorUpdating: (bb) => {
+				if (playing) scrollTo(bb, false);
+				else lastY = null;
+			},
+		};
+
+		// Opened from a section: show its bars once drawn, and again once the
+		// player is ready (in case a render moved things). Any move by the
+		// user (setPos), Play or a hand scroll ends this.
+		hold = pos.sel ? pos.sel.start : null;
+		const settle = () =>
+			requestAnimationFrame(() => {
+				if (my !== token || hold === null) return;
+				scrollToBar(hold);
+				showSelectedChip();
+			});
+		const release = () => (hold = null);
+		scoreEl.addEventListener('wheel', release, { passive: true });
+		scoreEl.addEventListener('touchstart', release, { passive: true });
 		api.renderFinished.on(() => {
 			if (my !== token) return;
 			setStatus('');
 			host.dataset.rendered = 'true';
 			drawMarks();
-			// Opened from a section: show its bars.
-			if (firstDraw && pos.sel) requestAnimationFrame(() => my === token && scrollToBar(pos.sel.start));
-			firstDraw = false;
+			if (hold !== null) settle();
 		});
 		api.error.on((e) => {
 			if (my !== token) return;
@@ -486,6 +538,7 @@ export function createTabPlayer(opts) {
 			applyRange();
 			seekTo(pos.cursor);
 			renderPlay();
+			if (hold !== null) settle();
 		});
 		api.playerStateChanged.on((e) => {
 			if (my !== token) return;
