@@ -12,9 +12,16 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Practice this chunk / Add as a new chunk (confirm)
 - [x] Audio: app click paused while the Tab player is open, never both; cancel token; shared soundfont bytes
 - [x] Harness `tabplayer.mjs` (all pass), screenshots 390 / 820 / 1280
-- [ ] Old harness scripts re-run (tabflow, p2keys, p2extra pass; slidetest, songflow, a11y, tabfix, stops33 running)
-- [ ] README + DESIGN.md
-- [ ] Deploy check
+- [x] Old harness scripts re-run: tabflow, p2keys, p2extra, slidetest, songflow, a11y, tabfix, stops33 all pass; `tabplayer.mjs` also passes on a production build (vite preview)
+- [x] README + DESIGN.md
+- [x] Deploy check (Vercel production 75f3719: success, URL 200, no console errors, lazy `tabplayer-*.js` served)
+
+## Known limits
+
+- Mute/solo are checked in the harness through what was handed to alphaTab (`changeTrackMute` / `changeTrackSolo`), not by listening to the synth output.
+- Speed and loop are alphaTab's: count-in plays only when playback starts, not before every loop pass.
+- A selection plays the first time the piece plays its bars straight through (repeats expanded), like Hear it.
+- Text-tab routines get no Tab player (no rhythm).
 
 ## Spec
 
