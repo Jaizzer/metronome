@@ -13,6 +13,14 @@ import { tempoAt, barRange, rangeText } from './slicer.js';
 
 const $ = (id) => document.getElementById(id);
 const OPEN_KEY = 'metronome:tab-open';
+const ALONG_KEY = 'metronome:tab-along';
+function lsGetJSON(k) {
+	try {
+		return JSON.parse(localStorage.getItem(k));
+	} catch {
+		return null;
+	}
+}
 
 function remembered() {
 	try {
@@ -42,11 +50,19 @@ export function createTabPanel(opts) {
 	let token = 0;
 	let hearing = false;
 	let pickFor = null; // the routine "Import again" was pressed for (player or Tab player)
+	// "Play with metronome": the tab loops with the click (alphaTab is the clock).
+	let alongOn = lsGetJSON(ALONG_KEY) === true;
+	let alongPlaying = false; // alphaTab is sounding the click + music now
+	let alongFileTempo = 0;
+	let currentFormat = null; // 'score' | 'text' for the shown section's routine
+	let rendering = null; // the latest render() promise
+	let alongSeq = 0; // bumped by every start/stop: a late start can't revive a stopped one
 
 	panel.open = remembered();
 	panel.addEventListener('toggle', () => {
 		remember(panel.open);
 		if (panel.open && current) render();
+		if (panel.open && current && alongOn) startAlong({ paused: opts.isPaused() });
 		if (!panel.open) stop();
 	});
 
@@ -91,6 +107,103 @@ export function createTabPanel(opts) {
 		if (!current) return;
 		$('tab-summary').replaceChildren(iconEl('tab'), summaryLabel(m));
 		if (panel.open && changed) render();
+		if (changed && alongOn) startAlong({ paused: opts.isPaused() });
+	}
+
+	// ---------- Play with metronome ----------
+
+	const mutesKey = (p) => `metronome:tab-mutes:${p.id}`;
+	function mutesFor(p) {
+		const v = lsGetJSON(mutesKey(p));
+		return { muted: Array.isArray(v?.muted) ? v.muted : [], clickOnly: Boolean(v?.clickOnly) };
+	}
+	function saveMutes(p, v) {
+		try {
+			localStorage.setItem(mutesKey(p), JSON.stringify(v));
+		} catch {
+			// private mode: not remembered
+		}
+	}
+
+	// Loop the current section's bars with the click, at the live tempo.
+	async function startAlong({ paused = false } = {}) {
+		if (!alongOn || !current || !panel.open) return;
+		const seq = ++alongSeq;
+		const at = current;
+		const live = () => alongOn && seq === alongSeq && current === at && panel.open;
+		await (rendering ?? render());
+		if (!live() || !view || currentFormat !== 'score') return;
+		const src = await sourceFor(at.p).catch(() => null);
+		if (!live() || !src || src.format !== 'score' || !view) return;
+		const { m } = at;
+		alongFileTempo = tempoAt(sourceBars(src), m.bars[0]) || src.score.tempo || 120;
+		const v = view;
+		const off = v.onState((st) => {
+			if ('playing' in st) alongPlaying = st.playing && view === v;
+			if (st.loading !== undefined) setStatus(st.loading ? 'Loading sound…' : '');
+		});
+		try {
+			const r = await v.along({
+				bpm: opts.liveBpm(),
+				fileTempo: alongFileTempo,
+				start: m.bars[0],
+				end: m.bars[1],
+				seam: Boolean(m.seam),
+				range: m.range ?? null,
+				...mutesFor(at.p),
+				paused,
+			});
+			if (r === 'failed') throw new Error('Couldn’t play the tab');
+		} catch (e) {
+			opts.toast(`${e.message || e} · back to the normal click`, 'error', 3000);
+		} finally {
+			off();
+			if (view === v) alongPlaying = false;
+		}
+	}
+
+	function renderAlongTools() {
+		const box = $('tab-along-tools');
+		if (!box || !current) return;
+		const sw = $('tab-along');
+		sw?.setAttribute('aria-checked', String(alongOn));
+		if (!alongOn) return box.replaceChildren();
+		const p = current.p;
+		const st = mutesFor(p);
+		const tracks = view?.api?.score?.tracks ?? [];
+		const toggle = (label, pressed, onclick) =>
+			h('button', { class: 'btn btn-quiet tab-track', type: 'button', 'aria-pressed': String(pressed), onclick }, label);
+		box.replaceChildren(
+			...tracks.map((t) =>
+				toggle(t.name || `Track ${t.index + 1}`, !st.clickOnly && !st.muted.includes(t.index), () => {
+					const v = mutesFor(p);
+					v.muted = v.muted.includes(t.index) ? v.muted.filter((i) => i !== t.index) : [...v.muted, t.index];
+					v.clickOnly = false;
+					saveMutes(p, v);
+					view?.setMutes(v.muted, v.clickOnly);
+					renderAlongTools();
+				}),
+			),
+			toggle('Click only', st.clickOnly, () => {
+				const v = mutesFor(p);
+				v.clickOnly = !v.clickOnly;
+				saveMutes(p, v);
+				view?.setMutes(v.muted, v.clickOnly);
+				renderAlongTools();
+			}),
+		);
+	}
+
+	function setAlong(on) {
+		alongOn = on;
+		try {
+			localStorage.setItem(ALONG_KEY, JSON.stringify(on));
+		} catch {
+			// private mode
+		}
+		renderAlongTools();
+		if (on) startAlong({ paused: opts.isPaused() });
+		else stop();
 	}
 
 	function setStatus(text) {
@@ -108,7 +221,12 @@ export function createTabPanel(opts) {
 		btn.dataset.state = state;
 	}
 
-	async function render() {
+	function render() {
+		rendering = doRender();
+		return rendering;
+	}
+
+	async function doRender() {
 		const my = ++token;
 		const { p, m } = current;
 		let src;
@@ -134,6 +252,7 @@ export function createTabPanel(opts) {
 			return;
 		}
 		const [a, b] = m.bars;
+		currentFormat = src.format;
 		if (src.format === 'text') {
 			dropView();
 			const blocks = textBarsSlice(src.parsed, a, b);
@@ -156,8 +275,15 @@ export function createTabPanel(opts) {
 					{ class: 'tab-tools' },
 					h('button', { class: 'btn', type: 'button', id: 'tab-hear', 'aria-pressed': 'false', onclick: hear }),
 					h('button', { class: 'btn btn-quiet', type: 'button', id: 'tab-full', onclick: () => opts.openFull?.() }, iconEl('expand'), 'Open full tab'),
+					h(
+						'button',
+						{ class: 'switch', type: 'button', role: 'switch', id: 'tab-along', 'aria-checked': String(alongOn), onclick: () => setAlong(!alongOn) },
+						h('span', { class: 'switch-track', 'aria-hidden': 'true' }),
+						'Play with metronome',
+					),
 					h('span', { id: 'tab-status', class: 'tab-status', 'aria-live': 'polite' }),
 				),
+				h('div', { id: 'tab-along-tools', class: 'tab-along-tools' }),
 				viewHost,
 			);
 			hearButton('idle');
@@ -174,6 +300,7 @@ export function createTabPanel(opts) {
 		viewHost.setAttribute('aria-label', `Tab, ${spanText(m)}`);
 		try {
 			await view.show(src.score, src.track, a, b, m.range ?? null);
+			if (my === token) renderAlongTools();
 		} catch (e) {
 			if (my !== token) return;
 			dropView(); // the next try starts from a fresh alphaTab view
@@ -218,6 +345,7 @@ export function createTabPanel(opts) {
 	}
 
 	function stop() {
+		alongSeq++;
 		view?.stop();
 	}
 
@@ -275,6 +403,17 @@ export function createTabPanel(opts) {
 	return {
 		update,
 		stop,
+		// Play with metronome is on and this section has a playable tab.
+		wantsAlong: () => alongOn && Boolean(current) && panel.open && currentFormat === 'score',
+		get alongPlaying() {
+			return alongPlaying;
+		},
+		pauseAlong: () => view?.pause(),
+		resumeAlong: () => {
+			if (!view?.isPlaying) startAlong({ paused: false });
+			else view.resume();
+		},
+		alongSpeed: (bpm) => view?.setSpeed(bpm, alongFileTempo),
 		sourceFor,
 		pickFile,
 		get hearing() {

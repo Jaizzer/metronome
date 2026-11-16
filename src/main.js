@@ -1193,7 +1193,7 @@ function scheduler() {
 	while (nextTickTime < audioCtx.currentTime + 0.1) {
 		const beat = beatCounter % 4;
 		const tickTime = nextTickTime;
-		playClick(tickTime, beat === 0);
+		if (!tabPanel.alongPlaying) playClick(tickTime, beat === 0); // with "Play with metronome", alphaTab clicks
 		if (isRamping && totalSectionTime > 0) {
 			const elapsed = totalSectionTime - timeLeftInSection;
 			const t = Math.min(elapsed / totalSectionTime, 1);
@@ -1264,8 +1264,10 @@ function updateProgressBar(fraction) {
 	$('progress-bar').style.width = Math.max(0, fraction) * 100 + '%';
 }
 
+let onTempoChange = null; // set once the Tab panel exists ("Play with metronome" follows the tempo)
 function adjustBPMDisplay() {
 	currentBPM = Math.round(Math.max(20, Math.min(300, currentBPM)));
+	onTempoChange?.(currentBPM);
 	const el = $('bpm-display');
 	el.textContent = currentBPM;
 	el.setAttribute('aria-valuenow', currentBPM);
@@ -1288,7 +1290,11 @@ function adjustBPM(amount) {
 
 function togglePause() {
 	isPaused = !isPaused;
-	if (!isPaused) tabPanel.stop(); // the click and "Hear it" never play together
+	// The click and "Hear it" never play together; "Play with metronome" follows Play/Pause.
+	if (!isPaused) {
+		if (tabPanel.wantsAlong()) tabPanel.resumeAlong();
+		else tabPanel.stop();
+	} else tabPanel.pauseAlong();
 	if (!isPaused && audioCtx) nextTickTime = audioCtx.currentTime + 0.05; // no catch-up burst
 	renderPlayButton();
 	if (isPaused) lightUpDot(-1);
@@ -2510,6 +2516,7 @@ const tabPanel = createTabPanel({
 		if (view === 'tabplayer' && tabPlayerFor === p) tabPlayer?.reload();
 	},
 	liveBpm: () => currentBPM,
+	isPaused: () => isPaused,
 	// "Hear it" pauses the click and resumes it afterwards (if it was running).
 	pauseClick: () => {
 		if (isPaused || view !== 'player') return false;
@@ -2520,6 +2527,8 @@ const tabPanel = createTabPanel({
 		if (isPaused && view === 'player') togglePause();
 	},
 });
+
+onTempoChange = (bpm) => tabPanel.alongSpeed(bpm);
 
 // ---------------- Tab player (docs/TAB-PLAYER.md) ----------------
 // A full-screen view loaded on demand (src/tabplayer.js + alphaTab). The

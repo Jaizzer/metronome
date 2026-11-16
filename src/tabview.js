@@ -175,17 +175,33 @@ export function createTabView(container, { scale = 0.9 } = {}) {
 	}
 	api.renderFinished.on(() => drawRange());
 
+	function setMutes(muted, clickOnly) {
+		const tracks = api.score?.tracks ?? [];
+		const off = new Set(muted);
+		const mute = tracks.filter((t) => clickOnly || off.has(t.index));
+		const live = tracks.filter((t) => !(clickOnly || off.has(t.index)));
+		if (mute.length) api.changeTrackMute(mute, true);
+		if (live.length) api.changeTrackMute(live, false);
+	}
+
 	api.playerStateChanged.on((e) => {
 		host.dataset.synth = e.state === alphaTab.synth.PlayerState.Playing ? 'playing' : 'stopped'; // read by the harness
 		if (e.state === alphaTab.synth.PlayerState.Playing) host.dataset.everPlayed = 'true';
-		if (e.state === alphaTab.synth.PlayerState.Playing) emit({ playing: true });
-		else if (e.stopped || e.state === alphaTab.synth.PlayerState.Paused) finish('stopped');
+		if (e.state === alphaTab.synth.PlayerState.Playing) {
+			if (playing) playing.started = true;
+			emit({ playing: true });
+		}
+		// A stop event can arrive late from the previous playback: only one that
+		// comes after this playback actually started ends it.
+		else if (playing?.started && (e.stopped || (e.state === alphaTab.synth.PlayerState.Paused && !playing.loop))) finish('stopped');
 	});
-	api.playerFinished.on(() => finish('finished'));
+	api.playerFinished.on(() => {
+		if (!playing?.loop) finish('finished'); // a loop wrapping round isn't the end
+	});
 	// Backstop for the playback range: stop once the end tick is reached.
 	api.playerPositionChanged.on((e) => {
 		host.dataset.tick = String(e.currentTick); // where playback is (read by the harness)
-		if (playing && e.currentTick >= playing.endTick) {
+		if (playing && !playing.loop && e.currentTick >= playing.endTick) {
 			api.stop();
 			finish('finished');
 		}
@@ -269,7 +285,53 @@ export function createTabView(container, { scale = 0.9 } = {}) {
 		// time the piece plays them (repeats expanded), at `bpm`; the file's
 		// own tempo there is `fileTempo`. Resolves 'finished', 'stopped' or
 		// 'cancelled' (stop() while the sound was still loading).
-		async hear({ bpm, fileTempo, start, end, seam = false, range = null }) {
+		async hear(o) {
+			const span = await this.prepare(o);
+			if (span === 'cancelled') return 'cancelled';
+			api.metronomeVolume = 0;
+			api.countInVolume = 0;
+			setMutes([], false);
+			api.isLooping = false;
+			api.playbackRange = span;
+			api.tickPosition = span.startTick;
+			return new Promise((resolve) => {
+				playing = { resolve, endTick: span.endTick };
+				if (!api.play()) finish('failed');
+			});
+		},
+		// "Play with metronome": loop the span with alphaTab's own click (one
+		// clock for click and music). Pause/resume keep it alive; stop() ends it.
+		async along(o) {
+			const span = await this.prepare(o);
+			if (span === 'cancelled') return 'cancelled';
+			api.metronomeVolume = 1;
+			api.countInVolume = 0;
+			setMutes(o.muted ?? [], Boolean(o.clickOnly));
+			api.isLooping = true;
+			api.playbackRange = span;
+			api.tickPosition = span.startTick;
+			return new Promise((resolve) => {
+				playing = { resolve, endTick: span.endTick, loop: true };
+				if (o.paused) return;
+				if (!api.play()) finish('failed');
+			});
+		},
+		pause() {
+			if (playing?.loop) api.pause();
+		},
+		resume() {
+			if (playing?.loop) api.play();
+		},
+		setSpeed(bpm, fileTempo) {
+			if (!playing) return;
+			api.playbackSpeed = Math.max(0.25, Math.min(2, bpm / (fileTempo || bpm)));
+			host.dataset.speed = String(api.playbackSpeed); // read by the harness
+		},
+		setMutes(muted, clickOnly) {
+			if (playing?.loop) setMutes(muted, clickOnly);
+		},
+		// Load the synth (once), then the played-out tick span for the bars.
+		async prepare({ bpm, fileTempo, start, end, seam = false, range = null }) {
 			if (!shown) throw new Error('Nothing to play');
 			this.stop();
 			const my = ++gen;
@@ -296,14 +358,8 @@ export function createTabView(container, { scale = 0.9 } = {}) {
 			const span = range ? playedSpan(list, { start, end, range }) : playedRange(list, start, end, { seam, beatTicks });
 			if (!span) throw new Error('These bars aren’t played in this file');
 			api.playbackSpeed = Math.max(0.25, Math.min(2, bpm / (fileTempo || bpm)));
-			api.isLooping = false;
-			api.playbackRange = span;
-			api.tickPosition = span.startTick;
 			host.dataset.span = `${span.startTick}-${span.endTick}`; // read by the harness
-			return new Promise((resolve) => {
-				playing = { resolve, endTick: span.endTick };
-				if (!api.play()) finish('failed');
-			});
+			return span;
 		},
 		// Stops playback, or cancels a Hear it that is still loading.
 		stop() {
@@ -313,7 +369,10 @@ export function createTabView(container, { scale = 0.9 } = {}) {
 				cancelWait = null;
 				emit({ loading: false });
 			}
-			if (!playing) return;
+			if (!playing) {
+				if (host.dataset.synth === 'playing') api.stop(); // never leave sound running
+				return;
+			}
 			api.stop();
 			finish('stopped');
 		},

@@ -2399,3 +2399,24 @@ dialog p {
 .player-title:focus {
 	outline: none;
 }
+
+/* "Play with metronome" track toggles in the player's Tab panel */
+.tab-along-tools {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--s1) var(--s2);
+}
+
+.tab-along-tools:empty {
+	display: none;
+}
+
+.tab-track[aria-pressed='false'] {
+	color: var(--paper-3);
+	text-decoration: line-through;
+}
+
+.tab-track[aria-pressed='true'] {
+	color: var(--paper);
+	border-color: var(--rule-strong);
+}
