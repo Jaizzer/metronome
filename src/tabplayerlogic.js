@@ -39,24 +39,33 @@ export function dragBars(pos, from, to) {
 	return { cursor: sel.start, sel, anchor: null };
 }
 
-// ← / → : one bar, kept inside the piece. The selection stays.
+// ← / → : one bar. With a selection the cursor stays inside it (it never
+// leaves or snaps); without one it moves through the piece, keeping a
+// pending start ([ or a first tap).
 export function moveCursor(pos, delta, total) {
-	return { ...pos, cursor: clampBar(pos.cursor + delta, total), anchor: null };
+	if (pos.sel) {
+		const cursor = Math.max(pos.sel.start, Math.min(pos.sel.end, Math.round(pos.cursor + delta)));
+		return { ...pos, cursor, anchor: null };
+	}
+	return { ...pos, cursor: clampBar(pos.cursor + delta, total) };
 }
 
-// [ : the selection starts at the cursor (ends there too when that's
-// before the cursor or there is none).
+// [ : with a selection, it now starts at the cursor (inside it, see
+// moveCursor). Without one, the cursor's bar becomes a pending start that
+// ] (or a tap) completes.
 export function setLoopStart(pos) {
 	const c = pos.cursor;
-	const end = pos.sel && pos.sel.end >= c ? pos.sel.end : c;
-	return { cursor: c, sel: { start: c, end }, anchor: null };
+	if (pos.sel) return { cursor: c, sel: { start: c, end: Math.max(pos.sel.end, c) }, anchor: null };
+	return { cursor: c, sel: null, anchor: c };
 }
 
-// ] : the selection ends at the cursor; the cursor goes back to its start.
+// ] : the selection ends at the cursor (from the pending start, else from
+// the selection's start, else just this bar); the cursor goes to its start.
 export function setLoopEnd(pos) {
 	const c = pos.cursor;
-	const start = pos.sel && pos.sel.start <= c ? pos.sel.start : c;
-	return { cursor: start, sel: { start, end: c }, anchor: null };
+	const from = pos.sel ? Math.min(pos.sel.start, c) : (pos.anchor ?? c);
+	const sel = normalizeSel(from, c);
+	return { cursor: sel.start, sel, anchor: null };
 }
 
 export const selectBars = (start, end) => ({ cursor: Math.min(start, end), sel: normalizeSel(start, end), anchor: null });
@@ -144,6 +153,10 @@ export function newChunkSection(sections, sel, { bars, target, makeId = () => un
 	if (section.id === undefined) delete section.id;
 	return section;
 }
+
+// A section's name without its bar range ("Verse · bars 5–6" → "Verse"),
+// for the selection line that already shows the bars.
+export const shortName = (name) => String(name ?? '').replace(/\s*·\s*bars?\s+\d+(?:–\d+)?\s*$/, '').trim() || String(name ?? '');
 
 export const selectionLabel = (sel) => (sel ? barRange(sel.start, sel.end).replace(/^b/, 'B') : '');
 

@@ -19,6 +19,7 @@ import {
 	insertIndex,
 	newChunkSection,
 	selectionLabel,
+	shortName,
 	barAtTick,
 	barStartTick,
 	selectionTicks,
@@ -61,29 +62,38 @@ test('drag selects a range; a drag that stays on one bar is a tap', () => {
 	assert.deepEqual(dragBars(position(), 4, 4), { cursor: 4, sel: null, anchor: 4 });
 });
 
-test('arrows move one bar inside the piece and keep the selection', () => {
-	const p = { cursor: 5, sel: { start: 5, end: 6 }, anchor: 5 };
-	assert.deepEqual(moveCursor(p, 1, 10), { cursor: 6, sel: { start: 5, end: 6 }, anchor: null });
+test('arrows: without a selection, one bar through the piece', () => {
+	assert.equal(moveCursor(position(5), 1, 10).cursor, 6);
 	assert.equal(moveCursor(position(1), -1, 10).cursor, 1);
 	assert.equal(moveCursor(position(10), 1, 10).cursor, 10);
+	// A pending start ([ or a first tap) is kept.
+	assert.deepEqual(moveCursor({ cursor: 5, sel: null, anchor: 5 }, 1, 10), { cursor: 6, sel: null, anchor: 5 });
 });
 
-test('[ sets the loop start at the cursor', () => {
-	assert.deepEqual(setLoopStart(position(3)).sel, { start: 3, end: 3 });
-	assert.deepEqual(setLoopStart({ cursor: 3, sel: { start: 5, end: 8 }, anchor: null }).sel, { start: 3, end: 8 });
-	// Past the old end: a one-bar loop at the cursor.
-	assert.deepEqual(setLoopStart({ cursor: 9, sel: { start: 5, end: 8 }, anchor: null }).sel, { start: 9, end: 9 });
+test('arrows: with a selection, the cursor stays inside it', () => {
+	const p = { cursor: 5, sel: { start: 5, end: 6 }, anchor: null };
+	assert.deepEqual(moveCursor(p, 1, 10), { cursor: 6, sel: { start: 5, end: 6 }, anchor: null });
+	assert.equal(moveCursor({ ...p, cursor: 6 }, 1, 10).cursor, 6);
+	assert.equal(moveCursor(p, -1, 10).cursor, 5);
+	assert.deepEqual(moveCursor(p, -1, 10).sel, { start: 5, end: 6 });
 });
 
-test('] sets the loop end at the cursor and returns the cursor to the start', () => {
-	assert.deepEqual(setLoopEnd({ cursor: 8, sel: { start: 5, end: 6 }, anchor: null }), { cursor: 5, sel: { start: 5, end: 8 }, anchor: null });
-	assert.deepEqual(setLoopEnd(position(4)).sel, { start: 4, end: 4 });
-	// Before the old start: a one-bar loop at the cursor.
-	assert.deepEqual(setLoopEnd({ cursor: 2, sel: { start: 5, end: 6 }, anchor: null }).sel, { start: 2, end: 2 });
-	// [ then → → ] = three bars.
+test('[ without a selection marks a pending start; ] completes it', () => {
+	assert.deepEqual(setLoopStart(position(3)), { cursor: 3, sel: null, anchor: 3 });
+	// [ then → → ] = three bars, cursor back at the start.
 	let p = setLoopStart(position(5));
 	p = moveCursor(moveCursor(p, 1, 10), 1, 10);
-	assert.deepEqual(setLoopEnd(p).sel, { start: 5, end: 7 });
+	assert.deepEqual(setLoopEnd(p), { cursor: 5, sel: { start: 5, end: 7 }, anchor: null });
+	// ] before the pending start: the same bars, in order.
+	p = moveCursor(moveCursor(setLoopStart(position(5)), -1, 10), -1, 10);
+	assert.deepEqual(setLoopEnd(p).sel, { start: 3, end: 5 });
+	// ] with nothing pending: just this bar.
+	assert.deepEqual(setLoopEnd(position(4)).sel, { start: 4, end: 4 });
+});
+
+test('[ / ] with a selection trim it at the cursor', () => {
+	assert.deepEqual(setLoopStart({ cursor: 6, sel: { start: 5, end: 8 }, anchor: null }), { cursor: 6, sel: { start: 6, end: 8 }, anchor: null });
+	assert.deepEqual(setLoopEnd({ cursor: 7, sel: { start: 5, end: 8 }, anchor: null }), { cursor: 5, sel: { start: 5, end: 7 }, anchor: null });
 });
 
 test('selectBars, clearSelection, stopBar', () => {
@@ -159,6 +169,14 @@ test('newChunkSection: shaped like an imported chunk', () => {
 	assert.equal('id' in plain, false);
 	assert.equal(plain.startBPM, 84);
 	assert.equal('dense' in plain, false);
+});
+
+test('shortName drops the bar range from a section name', () => {
+	assert.equal(shortName('Verse · bars 5–6'), 'Verse');
+	assert.equal(shortName('Chunk · bars 3–5'), 'Chunk');
+	assert.equal(shortName('Solo · bar 9'), 'Solo');
+	assert.equal(shortName('Fast run'), 'Fast run');
+	assert.equal(shortName('Seam · bars 4–5'), 'Seam');
 });
 
 test('selectionLabel', () => {
