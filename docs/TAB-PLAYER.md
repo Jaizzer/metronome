@@ -23,7 +23,7 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Review round 2 minors: toast over the score under the chips (measured); `Loading…` text-only fits at 360; pending-start hint `Pending start · tap a bar or press ] to select up to it`; DESIGN.md / this file corrected
 - [x] Review round 2 deploy check (Vercel production d4e315c: success, URL 200, no console errors; tabplayer.mjs 153 checks pass on a production build)
 - [x] Review round 3 MAJOR: moves while `Loading…` no longer end at the top: alphaTab's forced scroll is ignored until our ready handler has sought and whenever nothing plays; after the seek the view goes to the cursor's bar only if the user moved to a bar or the opening section is held, never after a hand scroll (reviewer scripts rvtp-r3 / rvtp-r3b; tabplayer.mjs r3 checks)
-- [ ] Review round 3 deploy check
+- [x] Review round 3 deploy check (Vercel production 707f0fd: success, URL 200, no console errors)
 
 ## Known limits
 
