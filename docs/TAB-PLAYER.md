@@ -18,7 +18,7 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Review round 1 M1: fixed transport grid; Play/Pause keeps its place and the bar its height (harness: tap Play, tap the same spot → paused, speed unchanged, at 360 and 390)
 - [x] Review round 1 M2: chips, Stop and arrow keys scroll to the target bar's box (harness on a 400-bar file: chip 201–204, Stop, →/← with and without a selection, playback)
 - [x] Review round 1 minors: m1 arrows clamp to the selection, `[` marks a pending start; m2 reduced motion → scrollSpeed 0; m3 Play/Pause label without aria-pressed; m4 DESIGN.md; Open full tab selects the section's bars; `Bars 5–6 · Verse`; toast under the Tab player's header
-- [ ] Review round 1 deploy check
+- [x] Review round 1 deploy check (Vercel production e2f8e0a: success, URL 200, no console errors; tabplayer.mjs 147 checks pass on a production build)
 
 ## Known limits
 
