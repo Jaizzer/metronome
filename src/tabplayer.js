@@ -85,6 +85,8 @@ export function createTabPlayer(opts) {
 	let playedFrom = 1;
 	let pos = position(1);
 	let hold = null; // a bar kept in view while the tab loads (opened from a section)
+	let movedTo = false; // the user moved the cursor to a bar (chip, tap, arrow) since the last scroll by hand
+	let readyDone = false; // our playerReady handler (with its seek) has run
 	const mute = new Set();
 	const solo = new Set();
 	const el = {}; // controls that get updated
@@ -340,6 +342,7 @@ export function createTabPlayer(opts) {
 
 	function setPos(next, { seek = true } = {}) {
 		hold = null; // the user moved: stop holding the opening view
+		movedTo = true;
 		const selChanged = next.sel?.start !== pos.sel?.start || next.sel?.end !== pos.sel?.end;
 		pos = next;
 		if (selChanged) applyRange();
@@ -492,10 +495,12 @@ export function createTabPlayer(opts) {
 		};
 		api.customScrollHandler = {
 			[Symbol.dispose]() {},
-			// alphaTab calls this when playback pauses (scrollToCursor), also once
-			// as the player gets ready, with the cursor still on bar 1.
+			// alphaTab calls this when playback pauses (scrollToCursor). It also
+			// fires as the player gets ready, before our seek, with the cursor
+			// still on bar 1: ignored until our ready handler has run, and
+			// whenever we aren't playing (our seeks scroll by themselves).
 			forceScrollTo: (bb) => {
-				if (hold === null) scrollTo(bb, true);
+				if (readyDone && playing) scrollTo(bb, true);
 			},
 			onBeatCursorUpdating: (bb) => {
 				if (playing) scrollTo(bb, false);
@@ -513,7 +518,11 @@ export function createTabPlayer(opts) {
 				scrollToBar(hold);
 				showSelectedChip();
 			});
-		const release = () => (hold = null);
+		// A hand scroll: leave the view where the user put it.
+		const release = () => {
+			hold = null;
+			movedTo = false;
+		};
 		scoreEl.addEventListener('wheel', release, { passive: true });
 		scoreEl.addEventListener('touchstart', release, { passive: true });
 		api.renderFinished.on(() => {
@@ -538,7 +547,18 @@ export function createTabPlayer(opts) {
 			applyRange();
 			seekTo(pos.cursor);
 			renderPlay();
-			if (hold !== null) settle();
+			// After the seek: show the cursor's bar if the user moved to one
+			// while loading (chip, tap, arrow) or the opening section is held;
+			// not after a hand scroll.
+			if (hold !== null || movedTo) {
+				const bar = pos.cursor;
+				requestAnimationFrame(() => {
+					if (my !== token || !(hold !== null || movedTo)) return;
+					scrollToBar(bar);
+					showSelectedChip();
+				});
+			}
+			readyDone = true;
 		});
 		api.playerStateChanged.on((e) => {
 			if (my !== token) return;
@@ -611,6 +631,8 @@ export function createTabPlayer(opts) {
 	async function load() {
 		const my = ++token;
 		ready = false;
+		readyDone = false;
+		movedTo = false;
 		playing = false;
 		api?.destroy();
 		api = null;
