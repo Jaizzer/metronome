@@ -10,7 +10,7 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] 5b in the view: beat taps, second tap, mouse drag, handles (drag), Shift+← / Shift+→, bar-number taps stay bar-level, beat-level highlight, Add as a new chunk saves `range`
 - [x] Beat-level chunks elsewhere: chips, Practice this chunk, Open full tab, Tab panel (touched bars + beat highlight), Hear it (exact ticks), builder details line
 - [x] Harness: `tabpractice.mjs` (new) passes; `tabplayer.mjs` updated (Enter records now); old scripts re-run
-- [ ] README, DESIGN.md, docs/TAB-PLAYER.md
+- [x] README, DESIGN.md, docs/TAB-PLAYER.md
 - [ ] Deploy check
 
 Not in this phase: 5c (Tab follows the click in the normal player) and phase 6 (tab files on every device).
@@ -30,8 +30,8 @@ Not in this phase: 5c (Tab follows the click in the normal player) and phase 6 (
 
 - **Beat** = one note, chord or rest of the shown track (alphaTab's Beat, voice 1), numbered from 1 in its bar. A beat point: `{ bar, beat, tick, end }`: `tick` / `end` = ticks from the bar's start to where the beat starts / ends.
 - **Taps on the score:** a tap selects the nearest beat (alphaTab `boundsLookup`, the beat's x on the tapped staff line) and marks it as a pending start; a second tap selects from it to that beat (either order; both beats included); a tap while something is selected clears it and starts over. A mouse drag from beat to beat selects in one go; a touch drag scrolls.
-- **Bar-level stays:** a tap on a bar number (the band above the staff lines at the bar's left, 44px wide) selects bars exactly as before (first tap pending, second tap the bars between), and so do the chips, `[` and `]`. A beat range that covers whole bars (first beat of its first bar to the last beat of its last bar) is a bar selection.
-- **Handles:** a beat-level selection gets a 44×44px handle at each end (pointer only; amber bar with a grip). Dragging one moves that end to the nearest beat (never past the other end). **Shift+→ / Shift+←** move the end by one beat (from a bar selection: its last beat; with nothing selected: the cursor bar's first beat is selected first).
+- **Bar-level stays:** a tap on the band above a bar's staff lines (where its number, section marker and tempo sit; about 40px tall) selects bars exactly as before (first tap pending, second tap the bars between), and so do the chips, `[` and `]`. A beat range that covers whole bars (first beat of its first bar to the last beat of its last bar) is a bar selection.
+- **Handles:** a beat-level selection gets a 44×44px handle at each end (pointer only, not focusable: an amber knob under the staff with a 3px stem up the selection's edge). Dragging one moves that end to the nearest beat (never past the other end). **Shift+→ / Shift+←** move the end by one beat (from a bar selection: its last beat; with nothing selected: the cursor bar's first beat is selected first).
 - **Highlight:** the span is drawn beat-exact (from the start beat's left edge to the end beat's right edge on each line), amber at 16% with the 3px underline; the label reads `Bar 5 beat 3 → bar 7 beat 2` (`Bar 5 beats 3–6` inside one bar).
 - **Stored on the section** (no schema change): `range: { start: { bar, beat, tick }, end: { bar, beat, tick } }` with `start.tick` = where the span starts in its bar and `end.tick` = where it ends in its bar (after the end beat); `bars: [start.bar, end.bar]` = the bars it touches (labels, the Tab panel, older code).
 - **Ticks:** played-out ticks (repeats expanded): the first time the piece plays bars start..end straight through, `startTick = that pass's start-bar tick + start.tick`, `endTick = that pass's end-bar tick + end.tick` (same fallback as `playedRange` when never played straight through).
