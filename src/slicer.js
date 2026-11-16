@@ -33,6 +33,14 @@ export function isDense(bar) {
 
 export const barRange = (start, end) => (start === end ? `bar ${start}` : `bars ${start}–${end}`);
 
+// A beat range's label (docs/TAB-PRACTICE.md): "bar 5 beat 3 → bar 7 beat 2",
+// "bar 5 beats 3–6", "bar 5 beat 3".
+export function rangeText(range) {
+	const { start: s, end: e } = range;
+	if (s.bar !== e.bar) return `bar ${s.bar} beat ${s.beat} → bar ${e.bar} beat ${e.beat}`;
+	return s.beat === e.beat ? `bar ${s.bar} beat ${s.beat}` : `bar ${s.bar} beats ${s.beat}–${e.beat}`;
+}
+
 export function chunkName(label, start, end) {
 	return `${label} · ${barRange(start, end)}`;
 }

@@ -9,7 +9,7 @@ import { h, iconEl } from './dom.js';
 import { ACCEPT, readTab, sourceFromRecord, sourceBars, loadTabView } from './tabload.js';
 import { loadTab, saveTab, tabRecord, routineTab, checkReattach } from './tabstore.js';
 import { textBarsSlice } from './tabtext.js';
-import { tempoAt, barRange } from './slicer.js';
+import { tempoAt, barRange, rangeText } from './slicer.js';
 
 const $ = (id) => document.getElementById(id);
 const OPEN_KEY = 'metronome:tab-open';
@@ -75,8 +75,11 @@ export function createTabPanel(opts) {
 		return cache.get(p.id);
 	}
 
+	// What a section covers: its bars, or its beat range.
+	const spanText = (m) => (m.range ? rangeText(m.range) : barRange(m.bars[0], m.bars[1]));
+
 	function summaryLabel(m) {
-		const r = barRange(m.bars[0], m.bars[1]);
+		const r = spanText(m);
 		return m.seam ? `Tab · seam, ${r}` : `Tab · ${r}`;
 	}
 
@@ -137,7 +140,7 @@ export function createTabPanel(opts) {
 			body.replaceChildren(
 				h(
 					'div',
-					{ class: 'tab-render tab-render-text', role: 'img', 'aria-label': `Tab, ${barRange(a, b)}` },
+					{ class: 'tab-render tab-render-text', role: 'img', 'aria-label': `Tab, ${spanText(m)}` },
 					blocks.length ? blocks.map((lines) => h('pre', { class: 'tab-text' }, lines.join('\n'))) : h('p', { class: 'tab-note' }, 'These bars aren’t in the file'),
 				),
 				h('p', { class: 'tab-note' }, 'Text tabs have no rhythm, so there’s nothing to play.'),
@@ -146,7 +149,7 @@ export function createTabPanel(opts) {
 		}
 		if (!view || !viewHost?.isConnected) {
 			dropView();
-			viewHost = h('div', { class: 'tab-render', role: 'img', 'aria-label': `Tab, ${barRange(a, b)}` });
+			viewHost = h('div', { class: 'tab-render', role: 'img', 'aria-label': `Tab, ${spanText(m)}` });
 			body.replaceChildren(
 				h(
 					'div',
@@ -168,9 +171,9 @@ export function createTabPanel(opts) {
 				return;
 			}
 		}
-		viewHost.setAttribute('aria-label', `Tab, ${barRange(a, b)}`);
+		viewHost.setAttribute('aria-label', `Tab, ${spanText(m)}`);
 		try {
-			await view.show(src.score, src.track, a, b);
+			await view.show(src.score, src.track, a, b, m.range ?? null);
 		} catch (e) {
 			if (my !== token) return;
 			dropView(); // the next try starts from a fresh alphaTab view
@@ -202,7 +205,7 @@ export function createTabPanel(opts) {
 			}
 		});
 		try {
-			await v.hear({ bpm, fileTempo, start: m.bars[0], end: m.bars[1], seam: Boolean(m.seam) });
+			await v.hear({ bpm, fileTempo, start: m.bars[0], end: m.bars[1], seam: Boolean(m.seam), range: m.range ?? null });
 		} catch (e) {
 			opts.toast(e.message || 'Couldn’t play the tab', 'error', 3000);
 		} finally {

@@ -11,7 +11,7 @@ import * as alphaTab from '@coderline/alphatab';
 import bravuraWoff2 from '@coderline/alphatab/font/Bravura.woff2?url';
 import bravuraWoff from '@coderline/alphatab/font/Bravura.woff?url';
 import soundFontUrl from '@coderline/alphatab/soundfont/sonivox.sf2?url';
-import { playedRange, playedBars, TICKS_PER_QUARTER } from './tabscore.js';
+import { playedRange, playedSpan, playedBars, beatPoints, TICKS_PER_QUARTER } from './tabscore.js';
 
 alphaTab.Logger.logLevel = alphaTab.LogLevel.Warning;
 
@@ -105,7 +105,12 @@ export function createTabView(container, { scale = 0.9 } = {}) {
 	host.className = 'tab-score';
 	container.replaceChildren(host);
 	const api = new alphaTab.AlphaTabApi(host, makeSettings(scale));
-	let shown = null; // { score, track, start, end }
+	// A beat-level chunk's span, drawn over the touched bars (docs/TAB-PRACTICE.md).
+	const marks = document.createElement('div');
+	marks.className = 'tab-range-marks';
+	marks.setAttribute('aria-hidden', 'true');
+	host.append(marks);
+	let shown = null; // { score, track, start, end, range }
 	let playing = null; // { resolve, endTick }
 	let ready = null; // Promise: the synth and soundfont are loaded
 	let gen = 0; // bumped by stop(): every await in hear() checks it
@@ -133,6 +138,42 @@ export function createTabView(container, { scale = 0.9 } = {}) {
 		emit({ playing: false });
 		p.resolve(reason);
 	}
+
+	// The span: from the start beat's slot to the end beat's slot (found by
+	// ticks in the shown track), whole bars in between.
+	function drawRange() {
+		marks.replaceChildren();
+		const r = shown?.range;
+		const look = api.renderer?.boundsLookup;
+		const surf = host.querySelector('.at-surface');
+		if (!r || !look || !surf) return;
+		marks.style.left = `${surf.offsetLeft}px`;
+		marks.style.top = `${surf.offsetTop}px`;
+		const pts = beatPoints(shown.score, shown.track);
+		const inBar = (bar) => pts.filter((p) => p.bar === bar);
+		const a = inBar(r.start.bar).find((p) => p.end > r.start.tick);
+		const z = [...inBar(r.end.bar)].reverse().find((p) => p.tick < r.end.tick);
+		const bounds = new Map();
+		for (const sys of look.staffSystems ?? []) for (const mb of sys.bars ?? []) for (const bb of mb.bars ?? []) for (const b of bb.beats ?? []) if (!bounds.has(b.beat)) bounds.set(b.beat, b);
+		for (let bar = r.start.bar; bar <= r.end.bar; bar++) {
+			const mb = look.findMasterBarByIndex(bar - 1);
+			if (!mb) continue;
+			let x0 = mb.realBounds.x;
+			let x1 = x0 + mb.realBounds.w;
+			const list = inBar(bar);
+			if (bar === r.start.bar && a && a !== list[0] && bounds.get(a.beatRef)) x0 = bounds.get(a.beatRef).realBounds.x;
+			if (bar === r.end.bar && z && z !== list[list.length - 1] && bounds.get(z.beatRef)) {
+				const b = bounds.get(z.beatRef).realBounds;
+				x1 = b.x + b.w;
+			}
+			const d = document.createElement('div');
+			d.className = 'tab-range-mark';
+			d.style.cssText = `left:${x0}px;top:${mb.visualBounds.y}px;width:${Math.max(2, x1 - x0)}px;height:${mb.visualBounds.h}px`;
+			marks.append(d);
+		}
+		host.dataset.range = `${r.start.bar}:${r.start.tick}-${r.end.bar}:${r.end.tick}`; // read by the harness
+	}
+	api.renderFinished.on(() => drawRange());
 
 	api.playerStateChanged.on((e) => {
 		host.dataset.synth = e.state === alphaTab.synth.PlayerState.Playing ? 'playing' : 'stopped'; // read by the harness
@@ -194,12 +235,18 @@ export function createTabView(container, { scale = 0.9 } = {}) {
 			listeners.add(fn);
 			return () => listeners.delete(fn);
 		},
-		// Draw bars start..end of one track. Rejects when alphaTab can't.
-		async show(score, track, start, end) {
+		// Draw bars start..end of one track (range: a beat-level span in them,
+		// highlighted). Rejects when alphaTab can't.
+		async show(score, track, start, end, range = null) {
 			this.stop();
 			const same = shown && shown.score === score && shown.track === track && shown.start === start && shown.end === end;
-			if (same) return;
-			shown = { score, track, start, end };
+			if (!range) delete host.dataset.range;
+			if (same) {
+				shown.range = range;
+				drawRange();
+				return;
+			}
+			shown = { score, track, start, end, range };
 			api.settings.display.startBar = start;
 			api.settings.display.barCount = end - start + 1;
 			api.settings.display.staveProfile = profileFor(score, track);
@@ -222,7 +269,7 @@ export function createTabView(container, { scale = 0.9 } = {}) {
 		// time the piece plays them (repeats expanded), at `bpm`; the file's
 		// own tempo there is `fileTempo`. Resolves 'finished', 'stopped' or
 		// 'cancelled' (stop() while the sound was still loading).
-		async hear({ bpm, fileTempo, start, end, seam = false }) {
+		async hear({ bpm, fileTempo, start, end, seam = false, range = null }) {
 			if (!shown) throw new Error('Nothing to play');
 			this.stop();
 			const my = ++gen;
@@ -245,14 +292,16 @@ export function createTabView(container, { scale = 0.9 } = {}) {
 			}
 			const mb = shown.score.masterBars[end - 1];
 			const beatTicks = mb ? (TICKS_PER_QUARTER * 4) / (mb.timeSignatureDenominator || 4) : TICKS_PER_QUARTER;
-			const range = playedRange(playedBars(api.tickCache), start, end, { seam, beatTicks });
-			if (!range) throw new Error('These bars aren’t played in this file');
+			const list = playedBars(api.tickCache);
+			const span = range ? playedSpan(list, { start, end, range }) : playedRange(list, start, end, { seam, beatTicks });
+			if (!span) throw new Error('These bars aren’t played in this file');
 			api.playbackSpeed = Math.max(0.25, Math.min(2, bpm / (fileTempo || bpm)));
 			api.isLooping = false;
-			api.playbackRange = range;
-			api.tickPosition = range.startTick;
+			api.playbackRange = span;
+			api.tickPosition = span.startTick;
+			host.dataset.span = `${span.startTick}-${span.endTick}`; // read by the harness
 			return new Promise((resolve) => {
-				playing = { resolve, endTick: range.endTick };
+				playing = { resolve, endTick: span.endTick };
 				if (!api.play()) finish('failed');
 			});
 		},

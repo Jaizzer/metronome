@@ -13,7 +13,9 @@
 // A beat point: { bar, beat, tick, end } (tabscore.beatPoints).
 // ============================================================
 
-import { barRange, chunkName, chunkSeconds, practiceSeconds, startTempo, isDense } from './slicer.js';
+import { barRange, chunkName, chunkSeconds, practiceSeconds, startTempo, isDense, rangeText } from './slicer.js';
+
+export { rangeText };
 import { playedRange, playedSpan, TICKS_PER_QUARTER } from './tabscore.js';
 
 export const SPEED_MIN = 50;
@@ -308,13 +310,6 @@ export function stepEnd(pos, delta, beats) {
 	const i = list.indexOf(z);
 	const next = list[Math.max(list.indexOf(a), Math.min(list.length - 1, i + Math.sign(delta)))] ?? z;
 	return fromRange(beatRange(a, next), list);
-}
-
-// "bar 5 beat 3 → bar 7 beat 2", "bar 5 beats 3–6", "bar 5 beat 3".
-export function rangeText(range) {
-	const { start: s, end: e } = range;
-	if (s.bar !== e.bar) return `bar ${s.bar} beat ${s.beat} → bar ${e.bar} beat ${e.beat}`;
-	return s.beat === e.beat ? `bar ${s.bar} beat ${s.beat}` : `bar ${s.bar} beats ${s.beat}–${e.beat}`;
 }
 
 // Ticks a range lasts, played straight through. `bars`: the slicer's bar
