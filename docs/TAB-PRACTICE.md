@@ -11,7 +11,7 @@ Running checklist so work can resume after an interruption (update it with every
 - [x] Beat-level chunks elsewhere: chips, Practice this chunk, Open full tab, Tab panel (touched bars + beat highlight), Hear it (exact ticks), builder details line
 - [x] Harness: `tabpractice.mjs` (new) passes; `tabplayer.mjs` updated (Enter records now); old scripts re-run
 - [x] README, DESIGN.md, docs/TAB-PLAYER.md
-- [ ] Deploy check
+- [x] Deploy check (Vercel production f8f116e: success, URL 200, no console errors, lazy `tabplayer-*.js` with phase 5 served; `tabpractice.mjs` 98 checks also pass on a production build)
 
 Not in this phase: 5c (Tab follows the click in the normal player) and phase 6 (tab files on every device).
 
