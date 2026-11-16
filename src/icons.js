@@ -42,5 +42,7 @@ export const icons = {
 	pencil: svg('<path d="M4 20l1-4.5L15.5 5a2 2 0 012.8 0l.7.7a2 2 0 010 2.8L8.5 19z"/><path d="M13.5 7l3.5 3.5"/>'),
 	countin: svg('<path d="M4 16.5v-3M9.33 16.5v-6M14.67 16.5v-9M20 16.5v-12"/><path d="M3 20.5h18"/>'),
 	expand: svg('<path d="M14 4h6v6M10 20H4v-6"/><path d="M20 4l-7 7M4 20l7-7"/>'),
+	clickOnly: svg('<path d="M4 9.5v5h3.5l5 4v-13l-5 4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>'),
+	unlock: svg('<rect x="5" y="11" width="14" height="9.5" rx="2"/><path d="M8.5 11V7.5a3.5 3.5 0 016.8-1.2"/>'),
 	paste: svg('<rect x="5.5" y="4.5" width="13" height="16" rx="2"/><path d="M9 4.5V3h6v1.5M9 10h6M9 14h6"/>'),
 };

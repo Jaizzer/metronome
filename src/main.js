@@ -36,7 +36,7 @@ import { h, iconEl } from './dom.js';
 import { createImporter } from './importer.js';
 import { createTabPanel } from './tabpanel.js';
 import { saveTab, deleteTab, tabRecord, routineTab } from './tabstore.js';
-import { barRange } from './slicer.js';
+import { barRange, rangeText } from './slicer.js';
 import {
 	newAttemptId,
 	mergeLog,
@@ -734,7 +734,14 @@ function selectSection(p, section) {
 
 // The section a record is attributed to: the playing one, else the selected one.
 // bpm: the tempo the run was played at (live tempo while playing).
+// In the Tab player: its selected chunk or the chunk under the cursor at its
+// speed (docs/TAB-PRACTICE.md); `none` when there is none (nothing records).
 function currentTarget() {
+	if (view === 'tabplayer' && tabPlayerFor) {
+		const t = tabPlayer?.target?.() ?? null;
+		const section = t ? tabPlayerFor.metronomes[t.index] : null;
+		return section ? { practice: tabPlayerFor, section, bpm: t.bpm } : { practice: tabPlayerFor, section: null, bpm: null, none: true };
+	}
 	if (view === 'player' && activePractice && activeMetIndex >= 0) {
 		return { practice: activePractice, section: activePractice.metronomes[activeMetIndex] ?? null, bpm: currentBPM };
 	}
@@ -763,8 +770,10 @@ function setSong(p, patch) {
 
 const playingSection = () => (view === 'player' && activePractice ? activePractice.metronomes[activeMetIndex] : null);
 
-// A short two-note cue for a tempo change, only if the click is running.
+// A short two-note cue for a tempo change, only if the click (or the Tab
+// player's playback) is running.
 function cueTone(dir) {
+	if (view === 'tabplayer' && !tabPlayer?.playing) return;
 	if (!audioCtx || audioCtx.state !== 'running') return;
 	const t = audioCtx.currentTime + 0.02;
 	const [a, b] = dir === 'up' ? [660, 990] : [990, 660];
@@ -859,6 +868,8 @@ setInterval(() => {
 // target: captured when the pedal was pressed (so a section change during
 // the double-tap window can't steal the record); defaults to "now".
 function record(kind, target = currentTarget()) {
+	// The Tab player with no chunk to record to: nothing is counted.
+	if (target?.none) return toast('Select a chunk to record', '', 1800);
 	const entry = recorder.record(kind, target);
 	noteSectionStats(target?.practice, target?.section, kind, 1);
 	noteTotals(kind, 1);
@@ -878,6 +889,7 @@ function record(kind, target = currentTarget()) {
 	const good = kind === 's';
 	strike(good ? 'success-zone' : 'fail-zone', 'is-struck', 450);
 	strike(good ? 'bar-good' : 'bar-bad', 'is-struck', 450);
+	if (view === 'tabplayer') tabPlayer?.refresh(); // live speed + record line
 	if (songMsg) return toast(songMsg, '', 2200);
 	const where = m?.name ? ` · ${m.name}` : '';
 	toast(`${good ? '✓ Good run' : '✗ Bad run'}${where}`, good ? 'good' : 'bad');
@@ -903,6 +915,7 @@ function undoLast() {
 	}
 	noteTotals(entry.kind, -1);
 	refreshStats();
+	if (view === 'tabplayer') tabPlayer?.refresh();
 
 	const good = entry.kind === 's';
 	$(good ? 'success-zone' : 'fail-zone').classList.remove('is-struck');
@@ -944,6 +957,7 @@ const pedal = createPedal({
 	onUndo: ({ cancelledPending }) => (cancelledPending ? cancelPendingToast() : undoLast()),
 	onPending: (on) => {
 		pedalPending = on;
+		tabPlayer?.pending(on);
 		$('undoBtn').disabled = !canUndo();
 		$('bar-undo').disabled = !canUndo();
 		for (const id of ['pedal-pending', 'bar-pending']) {
@@ -986,10 +1000,21 @@ window.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape' && !e.target.closest?.('details[open] textarea')) importer.close();
 		return;
 	}
-	// The Tab player: Space and the pedal's Enter play/pause there (no ✓/✗).
+	// The Tab player: Space plays/pauses, the pedal's Enter records ✓/✗/undo
+	// to its chunk (docs/TAB-PRACTICE.md), Cmd/Ctrl+Z undoes.
 	if (view === 'tabplayer') {
+		if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'z' && !isTypingTarget(e.target)) {
+			e.preventDefault();
+			if (!e.repeat) undoLast();
+			return;
+		}
 		const action = tabPlayer ? tabPlayer.keydown(e) : e.key === 'Escape' ? 'exit' : null;
 		if (action === 'exit') closeTabPlayer();
+		else if (action === 'pedal') {
+			if (audioCtx) initAudio(); // a key press may resume it, for the tempo tone
+			else if (tabPlayer.playing) initAudio();
+			pedal.keydown(e);
+		}
 		return;
 	}
 
@@ -1021,7 +1046,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('keyup', (e) => {
-	if (e.key === 'Enter' && view !== 'tabplayer') pedal.keyup();
+	if (e.key === 'Enter') pedal.keyup();
 });
 window.addEventListener('blur', () => pedal.cancelPress());
 
@@ -1362,7 +1387,8 @@ function updateTally() {
 }
 
 // One line under the beats in song mode: what the next attempt is for.
-function songLineText(p, m) {
+// bpm: the tempo of the next attempt (the Tab player passes its own).
+function songLineText(p, m, currentBPM = currentBPMNow()) {
 	if (isRun(m)) return 'Run · tap ✗ and keep playing';
 	const log = m.log ?? [];
 	const song = songNow(p);
@@ -1379,6 +1405,10 @@ function songLineText(p, m) {
 	if (st.kind === 's') return `Work · ${Math.max(1, 2 - st.n)} more ✓ to go up`;
 	if (st.kind === 'f') return `Work · ✗ ${st.n} in a row`;
 	return 'Work · 2 ✓ in a row to go up';
+}
+
+function currentBPMNow() {
+	return currentBPM;
 }
 
 function updateSongLine() {
@@ -1691,7 +1721,7 @@ const songRowStatus = (cs) => [STATE_LABEL[cs.state], cs.due && 'Due today'].fil
 function songDetailsEl(p, m, cs) {
 	const facts = [];
 	if (Array.isArray(m.bars)) {
-		const r = barRange(m.bars[0], m.bars[1]);
+		const r = m.range ? rangeText(m.range) : barRange(m.bars[0], m.bars[1]);
 		facts.push(`${m.seam ? 'Seam, ' + r : r[0].toUpperCase() + r.slice(1)}${m.dense ? ' · likely bottleneck' : ''}`);
 	}
 	if (cs.state !== 'run') facts.push(cs.owned === null ? 'Owned –' : `Owned ${cs.owned} BPM`);
@@ -2408,7 +2438,7 @@ const tabPanel = createTabPanel({
 	toast,
 	confirm: confirmDialog,
 	// From a section: the Tab player opens with that section's bars selected.
-	openFull: () => activePractice && openTabPlayer(activePractice, activePractice.metronomes[activeMetIndex]?.bars ?? null),
+	openFull: () => activePractice && openTabPlayer(activePractice, activePractice.metronomes[activeMetIndex] ?? null),
 	attached: (p) => {
 		if (view === 'tabplayer' && tabPlayerFor === p) tabPlayer?.reload();
 	},
@@ -2442,11 +2472,13 @@ function pauseClickForTab() {
 	}
 }
 
-async function openTabPlayer(p, initialBars = null) {
+// initial: the section to show selected ({ bars, range? }) or null.
+async function openTabPlayer(p, initial = null) {
 	if (view === 'tabplayer') return;
 	const my = ++tabPlayerToken;
 	tabPlayerFrom = view === 'player' ? 'player' : 'builder';
 	pauseClickForTab();
+	prepareSongSession(p); // today's start tempos, as when a routine starts
 	tabPlayerFor = p;
 	$('tp-title').textContent = p.name;
 	$('tp-pos').textContent = '';
@@ -2471,7 +2503,7 @@ async function openTabPlayer(p, initialBars = null) {
 		root: $('tp-main'),
 		posEl: $('tp-pos'),
 		source: () => tabPanel.sourceFor(p),
-		initialBars,
+		initial: initial?.bars ? { bars: initial.bars, range: initial.range ?? null } : null,
 		toast,
 		confirm: confirmDialog,
 		pickFile: () => tabPanel.pickFile(p),
@@ -2479,6 +2511,8 @@ async function openTabPlayer(p, initialBars = null) {
 		practice: (index) => practiceFromTab(p, index),
 		makeId: newSectionId,
 		insertSection: (section, index) => insertSectionFromTab(p, section, index),
+		isSong: () => isSong(p),
+		songLine: (i, bpm) => (isSong(p) && p.metronomes[i] ? songLineText(p, p.metronomes[i], bpm) : null),
 	});
 }
 
