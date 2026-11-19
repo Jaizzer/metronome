@@ -4,7 +4,7 @@
 // fetch/store/clock so it runs under node --test.
 
 export const CLIENT_ID = 'dc49097b05c7419fb97f58164a753ee2';
-export const SCOPES = 'user-read-playback-state user-modify-playback-state';
+export const SCOPES = 'user-read-playback-state user-modify-playback-state user-library-read user-read-playback-position';
 
 const AUTH_URL = 'https://accounts.spotify.com/authorize';
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
@@ -43,6 +43,44 @@ export function readCallback(search, savedState) {
 	if (p.get('error')) return { error: p.get('error') };
 	if (p.get('code')) return { code: p.get('code') };
 	return null;
+}
+
+// GET /me/player body -> what the now-playing card shows, or null when
+// nothing is loaded. Episodes carry their own images; tracks use the album's.
+export function describePlayback(body) {
+	const item = body?.item;
+	if (!item) return null;
+	const episode = item.type === 'episode';
+	const images = (episode ? item.images : item.album?.images) || [];
+	return {
+		playing: Boolean(body.is_playing),
+		title: item.name || '',
+		subtitle: episode ? item.show?.name || '' : (item.artists || []).map((a) => a.name).join(', '),
+		image: smallest(images),
+		device: body.device?.name || '',
+		progress: body.progress_ms || 0,
+		duration: item.duration_ms || 0,
+	};
+}
+
+const smallest = (images) => (images || []).at(-1)?.url || null;
+
+export function parseShows(body) {
+	return (body?.items || [])
+		.map((i) => i?.show)
+		.filter(Boolean)
+		.map((sh) => ({ id: sh.id, uri: sh.uri, name: sh.name, publisher: sh.publisher || '', image: smallest(sh.images) }));
+}
+
+export function parseEpisodes(body) {
+	return (body?.items || []).filter(Boolean).map((e) => ({
+		uri: e.uri,
+		name: e.name,
+		date: e.release_date || '',
+		duration: e.duration_ms || 0,
+		played: Boolean(e.resume_point?.fully_played),
+		resumeAt: e.resume_point?.resume_position_ms || 0,
+	}));
 }
 
 export const localStore = {
@@ -97,11 +135,12 @@ export function createSpotifyRemote({
 		}
 	}
 
-	function saveToken(body, oldRefresh) {
+	function saveToken(body, old = {}) {
 		const t = {
 			access: body.access_token,
-			refresh: body.refresh_token || oldRefresh, // Spotify may not send a new one
+			refresh: body.refresh_token || old.refresh, // Spotify may not send a new one
 			expiresAt: now() + (body.expires_in || 3600) * 1000,
+			scope: body.scope || old.scope || '',
 		};
 		store.set(KEY_TOKEN, JSON.stringify(t));
 		return t;
@@ -127,7 +166,7 @@ export function createSpotifyRemote({
 		refreshing = (async () => {
 			try {
 				const { res, body } = await tokenRequest({ grant_type: 'refresh_token', refresh_token: t.refresh });
-				if (res.ok && body.access_token) return saveToken(body, t.refresh);
+				if (res.ok && body.access_token) return saveToken(body, t);
 				if (res.status >= 400 && res.status < 500) disconnect('Spotify logged you out. Connect Spotify again.');
 				return null;
 			} catch {
@@ -147,7 +186,7 @@ export function createSpotifyRemote({
 	}
 
 	// One Web API call; on 401 refreshes once and retries.
-	async function call(method, path, query) {
+	async function call(method, path, query, json) {
 		for (const force of [false, true]) {
 			const token = await access(force);
 			if (!token) return null;
@@ -155,7 +194,9 @@ export function createSpotifyRemote({
 			for (const [k, v] of Object.entries(query || {})) if (v) url.searchParams.set(k, v);
 			let res;
 			try {
-				res = await fetch(url.toString(), { method, headers: { Authorization: `Bearer ${token}` } });
+				const headers = { Authorization: `Bearer ${token}` };
+				if (json) headers['Content-Type'] = 'application/json';
+				res = await fetch(url.toString(), { method, headers, body: json ? JSON.stringify(json) : undefined });
 			} catch {
 				onStatus("Couldn't reach Spotify. Check your connection.");
 				return null;
@@ -165,9 +206,37 @@ export function createSpotifyRemote({
 		return null;
 	}
 
+	async function getJson(path, query) {
+		const res = await call('GET', path, query);
+		if (!res || !res.ok) return null;
+		return res.json().catch(() => null);
+	}
+
 	return {
 		get connected() {
 			return readToken() !== null;
+		},
+
+		// Logged in with the library scope (older logins need to reconnect).
+		get canBrowse() {
+			return (readToken()?.scope || '').split(' ').includes('user-library-read');
+		},
+
+		async savedShows() {
+			const body = await getJson('/me/shows', { limit: '50' });
+			return body ? parseShows(body) : null;
+		},
+
+		async showEpisodes(showId) {
+			const body = await getJson(`/shows/${encodeURIComponent(showId)}/episodes`, { limit: '50' });
+			return body ? parseEpisodes(body) : null;
+		},
+
+		// Play one episode/track on the Spotify app, from positionMs.
+		async playUri(uri, positionMs = 0) {
+			const res = await call('PUT', '/me/player/play', { device_id: store.get(KEY_DEVICE, '') }, { uris: [uri], position_ms: positionMs });
+			if (res && res.status === 404) onStatus('Open Spotify on your phone first, then tap the episode again.');
+			return Boolean(res && res.ok);
 		},
 
 		async login() {
@@ -208,6 +277,23 @@ export function createSpotifyRemote({
 
 		logout() {
 			disconnect();
+		},
+
+		// What the Spotify app is playing (null: nothing, or not reachable).
+		async state() {
+			const res = await call('GET', '/me/player', { additional_types: 'episode,track' });
+			if (!res || res.status !== 200) return null;
+			const body = await res.json().catch(() => null);
+			if (body?.device?.id) store.set(KEY_DEVICE, body.device.id);
+			return describePlayback(body);
+		},
+
+		// Jump back/forward in the current item (podcasts: ±15 s).
+		async seekBy(deltaMs) {
+			const s = await this.state();
+			if (!s) return;
+			const pos = Math.max(0, Math.min(s.duration || Infinity, s.progress + deltaMs));
+			await call('PUT', '/me/player/seek', { position_ms: String(Math.round(pos)) });
 		},
 
 		// Pause or resume the Spotify app. Returns true only when it paused

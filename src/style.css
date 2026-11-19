@@ -2426,6 +2426,150 @@ dialog p {
 }
 
 /* Podcast panel (player): quiet, same disclosure pattern as Settings */
+/* Spotify app card + show list (connected) */
+.sp {
+	flex: 1 1 100%;
+	display: grid;
+	gap: var(--s3);
+}
+
+.sp-now {
+	display: grid;
+	grid-template-columns: 56px minmax(0, 1fr);
+	align-items: center;
+	gap: var(--s2) var(--s3);
+	padding: var(--s3);
+	border-radius: var(--radius);
+	background: var(--stock-raised);
+}
+
+.sp-now .sp-empty {
+	grid-column: 1 / -1;
+}
+
+.sp-art {
+	width: 56px;
+	height: 56px;
+	border-radius: 4px;
+	background: var(--stock-input);
+	object-fit: cover;
+}
+
+.sp-meta {
+	display: grid;
+	min-width: 0;
+	font-size: 14px;
+	color: var(--paper-2);
+}
+
+.sp-meta strong,
+.sp-meta span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sp-meta strong {
+	color: var(--paper);
+	font-size: 15px;
+}
+
+.sp-ctrl {
+	grid-column: 1 / -1;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	gap: var(--s4);
+}
+
+.sp-ctrl .btn {
+	font-family: var(--font-num);
+	font-size: 18px;
+}
+
+.sp-play {
+	display: grid;
+	place-items: center;
+	width: var(--tap);
+	height: var(--tap);
+	border: 0;
+	border-radius: 50%;
+	background: var(--amber);
+	color: var(--on-ink);
+	cursor: pointer;
+}
+
+.sp-play svg {
+	width: 22px;
+	height: 22px;
+	fill: currentColor;
+}
+
+.sp-head,
+.sp-empty {
+	margin: 0;
+	font-size: 14px;
+	color: var(--paper-3);
+}
+
+.sp-back {
+	justify-self: start;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.sp-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	max-height: 320px;
+	overflow-y: auto;
+	border-top: 1px solid var(--rule);
+}
+
+.sp-row {
+	display: grid;
+	width: 100%;
+	min-height: var(--tap);
+	padding: var(--s2) 0;
+	border: 0;
+	border-bottom: 1px solid var(--rule);
+	background: none;
+	color: var(--paper);
+	text-align: left;
+	font: inherit;
+	cursor: pointer;
+}
+
+.sp-show {
+	grid-template-columns: 40px minmax(0, 1fr);
+	column-gap: var(--s3);
+	align-items: center;
+}
+
+.sp-show .sp-art {
+	grid-row: span 2;
+	width: 40px;
+	height: 40px;
+}
+
+.sp-row-title {
+	font-size: 15px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sp-row-sub {
+	font-size: 13px;
+	color: var(--paper-3);
+}
+
+.sp-row:hover .sp-row-title {
+	color: var(--amber);
+}
+
 /* Link + embed: the fallback when the Spotify app isn't connected */
 .podcast-alt {
 	flex: 1 1 100%;

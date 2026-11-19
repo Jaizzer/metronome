@@ -2781,13 +2781,163 @@ function syncPodcast() {
 	}
 }
 
+// ---- Spotify card + show list (only while connected) ----
+let spNow = null; // describePlayback() of the Spotify app
+let spShows; // undefined = not loaded, null = Spotify refused, [] = none
+let spOpenShow = null; // { id, name } while its episodes are listed
+let spEpisodes;
+let spPoll = null;
+let spLibToken = 0;
+
+const fmtMin = (ms) => `${Math.max(1, Math.round(ms / 60000))} min`;
+
+function spAct(fn) {
+	remoteQueue = remoteQueue
+		.then(fn)
+		.then(() => new Promise((r) => setTimeout(r, 500)))
+		.then(refreshNowPlaying);
+	return remoteQueue;
+}
+
+async function refreshNowPlaying() {
+	if (!spotifyRemote.connected) return;
+	spNow = await spotifyRemote.state();
+	renderNowPlaying();
+}
+
+function renderNowPlaying() {
+	const box = $('sp-now');
+	if (!spNow) {
+		box.replaceChildren(h('p', { class: 'sp-empty' }, 'Nothing playing. Pick an episode below, or press play in Spotify.'));
+		return;
+	}
+	const toggle = () => {
+		const play = !spNow.playing;
+		podcastWePaused = false;
+		podcastManualPaused = !play; // same rules as the embed's own buttons
+		podcastOverride = play;
+		spAct(() => spotifyRemote.setPlaying(play));
+	};
+	box.replaceChildren(
+		spNow.image ? h('img', { class: 'sp-art', src: spNow.image, alt: '' }) : h('span', { class: 'sp-art' }),
+		h(
+			'div',
+			{ class: 'sp-meta' },
+			h('strong', {}, spNow.title),
+			h('span', {}, [spNow.subtitle, spNow.device].filter(Boolean).join(' · ')),
+		),
+		h(
+			'div',
+			{ class: 'sp-ctrl' },
+			h('button', { class: 'btn btn-quiet', type: 'button', 'aria-label': 'Back 15 seconds', onclick: () => spAct(() => spotifyRemote.seekBy(-15000)) }, '−15'),
+			h('button', { class: 'sp-play', type: 'button', 'aria-label': spNow.playing ? 'Pause' : 'Play', onclick: toggle, html: spNow.playing ? icons.pause : icons.play }),
+			h('button', { class: 'btn btn-quiet', type: 'button', 'aria-label': 'Forward 15 seconds', onclick: () => spAct(() => spotifyRemote.seekBy(15000)) }, '+15'),
+		),
+	);
+}
+
+function spPlay(ep) {
+	podcastWePaused = false;
+	podcastManualPaused = false;
+	podcastOverride = true; // picked by hand: plays until the next chunk
+	spAct(() => spotifyRemote.playUri(ep.uri, ep.played ? 0 : ep.resumeAt));
+}
+
+const spMsg = (text, ...extra) => [h('p', { class: 'sp-empty' }, text), ...extra];
+
+async function renderLibrary() {
+	const box = $('sp-lib');
+	const token = ++spLibToken; // a newer render wins
+	if (!spotifyRemote.canBrowse) {
+		box.replaceChildren(
+			...spMsg(
+				'Reconnect once to see your shows here.',
+				h('button', { class: 'btn', type: 'button', onclick: () => spotifyRemote.login() }, 'Reconnect Spotify'),
+			),
+		);
+		return;
+	}
+	const retry = h('button', { class: 'btn btn-quiet', type: 'button', onclick: () => ((spShows = spEpisodes = undefined), renderLibrary()) }, 'Try again');
+	if (spOpenShow) {
+		if (spEpisodes === undefined) {
+			box.replaceChildren(...spMsg('Loading episodes…'));
+			spEpisodes = await spotifyRemote.showEpisodes(spOpenShow.id);
+			if (token !== spLibToken) return;
+		}
+		const back = h('button', { class: 'btn btn-quiet sp-back', type: 'button', onclick: () => ((spOpenShow = null), (spEpisodes = undefined), renderLibrary()) }, iconEl('back'), spOpenShow.name);
+		if (!spEpisodes) return box.replaceChildren(back, ...spMsg("Spotify didn't send the episodes.", retry));
+		box.replaceChildren(
+			back,
+			h(
+				'ul',
+				{ class: 'sp-list' },
+				spEpisodes.map((e) =>
+					h(
+						'li',
+						{},
+						h(
+							'button',
+							{ class: 'sp-row', type: 'button', onclick: () => spPlay(e) },
+							h('span', { class: 'sp-row-title' }, e.name),
+							h('span', { class: 'sp-row-sub' }, [e.date, e.played ? 'Played' : e.resumeAt ? `${fmtMin(e.duration - e.resumeAt)} left` : fmtMin(e.duration)].filter(Boolean).join(' · ')),
+						),
+					),
+				),
+			),
+		);
+		return;
+	}
+	if (spShows === undefined) {
+		box.replaceChildren(...spMsg('Loading your shows…'));
+		spShows = await spotifyRemote.savedShows();
+		if (token !== spLibToken) return;
+	}
+	if (!spShows) return box.replaceChildren(...spMsg("Spotify didn't send your shows.", retry));
+	if (!spShows.length) return box.replaceChildren(...spMsg('No saved shows. Follow a podcast in Spotify and it shows up here.', retry));
+	box.replaceChildren(
+		h('p', { class: 'sp-head' }, 'Your shows'),
+		h(
+			'ul',
+			{ class: 'sp-list' },
+			spShows.map((sh) =>
+				h(
+					'li',
+					{},
+					h(
+						'button',
+						{ class: 'sp-row sp-show', type: 'button', onclick: () => ((spOpenShow = sh), (spEpisodes = undefined), renderLibrary()) },
+						sh.image ? h('img', { class: 'sp-art', src: sh.image, alt: '' }) : h('span', { class: 'sp-art' }),
+						h('span', { class: 'sp-row-title' }, sh.name),
+						h('span', { class: 'sp-row-sub' }, sh.publisher),
+					),
+				),
+			),
+		),
+	);
+}
+
+// Poll the now-playing card only while the panel is open and connected.
+function syncSpotifyUi() {
+	const live = spotifyRemote.connected && $('podcast-panel').open;
+	$('spotify-ui').hidden = !spotifyRemote.connected;
+	if (live && !spPoll) {
+		refreshNowPlaying();
+		renderLibrary();
+		spPoll = setInterval(() => !document.hidden && refreshNowPlaying(), 5000);
+	} else if (!live && spPoll) {
+		clearInterval(spPoll);
+		spPoll = null;
+	}
+}
+
 function renderSpotifyLogin() {
+	syncSpotifyUi();
 	const on = spotifyRemote.connected;
 	$('spotify-connect').textContent = on ? 'Disconnect Spotify app' : 'Connect Spotify app';
 	$('podcast-link-row').hidden = on;
 	if (on) $('podcast-embed').hidden = true;
 	else if ($('podcast-url').value.trim()) applyPodcastLink($('podcast-url').value, { save: false });
-	if (on) $('podcast-msg').textContent = 'Controlling the Spotify app. Play something there.';
+	if (on) $('podcast-msg').textContent = '';
 }
 
 function applyPodcastLink(raw, { save = true } = {}) {
@@ -2845,13 +2995,18 @@ function applyPodcastLink(raw, { save = true } = {}) {
 		if (spotifyRemote.connected) {
 			spotifyRemote.logout();
 			podcastWePaused = false;
+			spShows = spEpisodes = undefined;
+			spOpenShow = null;
 			$('podcast-msg').textContent = '';
 			renderSpotifyLogin();
 		} else spotifyRemote.login();
 	};
 	const linked = () => !spotifyRemote.connected;
 	// Lazy: Spotify's script loads only when the panel opens or a link was saved.
-	panel.addEventListener('toggle', () => panel.open && linked() && applyPodcastLink(input.value, { save: false }));
+	panel.addEventListener('toggle', () => {
+		syncSpotifyUi();
+		if (panel.open && linked()) applyPodcastLink(input.value, { save: false });
+	});
 	if (saved && linked()) applyPodcastLink(saved, { save: false });
 	renderSpotifyLogin();
 	// Back from Spotify's login page: finish, clean the URL, open the panel.

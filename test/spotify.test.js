@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { base64url, buildAuthUrl, readCallback, createSpotifyRemote, SCOPES } from '../src/spotify.js';
+import { base64url, buildAuthUrl, readCallback, createSpotifyRemote, describePlayback, parseShows, parseEpisodes, SCOPES } from '../src/spotify.js';
 
 function memStore(init = {}) {
 	const m = new Map(Object.entries(init));
@@ -137,4 +137,76 @@ test('finishing login exchanges the code with the saved verifier', async () => {
 	assert.equal(r.connected, true);
 	assert.equal(store.get('spotify.verifier', null), null);
 	assert.equal(await r.finishLogin('?code=C&state=S'), false); // state is single-use
+});
+
+test('describePlayback reads episodes and tracks, null when idle', () => {
+	assert.equal(describePlayback(null), null);
+	assert.equal(describePlayback({ is_playing: false, item: null }), null);
+	assert.deepEqual(
+		describePlayback({
+			is_playing: true,
+			progress_ms: 61000,
+			device: { name: 'iPhone' },
+			item: { type: 'episode', name: 'Ep 1', duration_ms: 3600000, show: { name: 'Show' }, images: [{ url: 'big' }, { url: 'small' }] },
+		}),
+		{ playing: true, title: 'Ep 1', subtitle: 'Show', image: 'small', device: 'iPhone', progress: 61000, duration: 3600000 },
+	);
+	const t = describePlayback({
+		is_playing: false,
+		progress_ms: 0,
+		device: { name: 'Mac' },
+		item: { type: 'track', name: 'Song', duration_ms: 200000, artists: [{ name: 'A' }, { name: 'B' }], album: { images: [{ url: 'cover' }] } },
+	});
+	assert.equal(t.subtitle, 'A, B');
+	assert.equal(t.image, 'cover');
+});
+
+test('state asks for episodes and seek clamps at zero', async () => {
+	const now = 1_000_000;
+	const fetch = fakeFetch({
+		'GET /v1/me/player': (u) => {
+			assert.equal(u.searchParams.get('additional_types'), 'episode,track');
+			return [200, { is_playing: true, progress_ms: 5000, device: { id: 'd' }, item: { type: 'episode', name: 'E', duration_ms: 9000, show: { name: 'S' }, images: [] } }];
+		},
+		'PUT /v1/me/player/seek': () => [204],
+	});
+	const r = createSpotifyRemote({ clientId: 'cid', redirectUri: 'r', fetch, store: memStore(fresh(now)), now: () => now });
+	const s = await r.state();
+	assert.equal(s.title, 'E');
+	await r.seekBy(-15000);
+	assert.equal(fetch.calls.at(-1).url.searchParams.get('position_ms'), '0');
+});
+
+test('library scope is asked for, and an old login without it reports so', () => {
+	assert.match(SCOPES, /user-library-read/);
+	const now = 1;
+	const old = createSpotifyRemote({ clientId: 'c', redirectUri: 'r', fetch: fakeFetch({}), store: memStore(fresh(now)), now: () => now });
+	assert.equal(old.canBrowse, false);
+	const store = memStore({ 'spotify.token': JSON.stringify({ access: 'A', refresh: 'R', expiresAt: 9e15, scope: SCOPES }) });
+	assert.equal(createSpotifyRemote({ clientId: 'c', redirectUri: 'r', fetch: fakeFetch({}), store, now: () => now }).canBrowse, true);
+});
+
+test('parseShows and parseEpisodes keep what the lists show', () => {
+	assert.deepEqual(
+		parseShows({ items: [{ show: { id: 's1', uri: 'spotify:show:s1', name: 'Pod', publisher: 'Pub', images: [{ url: 'b' }, { url: 's' }] } }, { show: null }] }),
+		[{ id: 's1', uri: 'spotify:show:s1', name: 'Pod', publisher: 'Pub', image: 's' }],
+	);
+	const eps = parseEpisodes({
+		items: [
+			{ uri: 'spotify:episode:e1', name: 'E1', release_date: '2026-11-01', duration_ms: 600000, images: [], resume_point: { fully_played: false, resume_position_ms: 120000 } },
+			null,
+		],
+	});
+	assert.deepEqual(eps, [{ uri: 'spotify:episode:e1', name: 'E1', date: '2026-11-01', duration: 600000, played: false, resumeAt: 120000 }]);
+});
+
+test('playUri starts an episode where it left off on the remembered device', async () => {
+	const now = 1;
+	const fetch = fakeFetch({ 'PUT /v1/me/player/play': () => [204] });
+	const store = memStore({ ...fresh(now), 'spotify.device': 'phone' });
+	const r = createSpotifyRemote({ clientId: 'c', redirectUri: 'r', fetch, store, now: () => now });
+	assert.equal(await r.playUri('spotify:episode:e1', 120000), true);
+	const c = fetch.calls.at(-1);
+	assert.equal(c.url.searchParams.get('device_id'), 'phone');
+	assert.deepEqual(JSON.parse(c.opts.body), { uris: ['spotify:episode:e1'], position_ms: 120000 });
 });
