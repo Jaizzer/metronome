@@ -149,7 +149,7 @@ test('describePlayback reads episodes and tracks, null when idle', () => {
 			device: { name: 'iPhone' },
 			item: { type: 'episode', name: 'Ep 1', duration_ms: 3600000, show: { name: 'Show' }, images: [{ url: 'big' }, { url: 'small' }] },
 		}),
-		{ playing: true, title: 'Ep 1', subtitle: 'Show', image: 'small', device: 'iPhone', progress: 61000, duration: 3600000 },
+		{ uri: null, playing: true, title: 'Ep 1', subtitle: 'Show', image: 'small', device: 'iPhone', progress: 61000, duration: 3600000 },
 	);
 	const t = describePlayback({
 		is_playing: false,

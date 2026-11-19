@@ -2793,6 +2793,14 @@ let spPoll = null;
 let spLibToken = 0;
 let spLibShown = false;
 let spCurrentUri = null; // highlighted in the episode list
+// Last thing played: Spotify's own player state, else the last pick here.
+let spResume = (() => {
+	try {
+		return JSON.parse(podStore.get('spotify.last', 'null'));
+	} catch {
+		return null;
+	}
+})();
 
 const fmtMin = (ms) => `${Math.max(1, Math.round(ms / 60000))} min`;
 
@@ -2847,6 +2855,10 @@ function spPlay(ep) {
 	podcastOverride = true; // picked by hand: plays until the next chunk
 	const startAt = ep.played ? 0 : ep.resumeAt;
 	spCurrentUri = ep.uri;
+	if (ep.name) {
+		spResume = { uri: ep.uri, title: ep.name, subtitle: spOpenShow?.name || '', progress: startAt };
+		podStore.set('spotify.last', JSON.stringify(spResume));
+	}
 	for (const row of document.querySelectorAll('#sp-lib .sp-row[data-uri]')) {
 		row.classList.toggle('is-current', row.dataset.uri === ep.uri);
 	}
@@ -2916,7 +2928,17 @@ async function renderLibrary() {
 	}
 	if (!spShows) return box.replaceChildren(...spMsg("Spotify didn't send your shows.", retry));
 	if (!spShows.length) return box.replaceChildren(...spMsg('No saved shows. Follow a podcast in Spotify and it shows up here.', retry));
+	const cont =
+		spResume?.uri &&
+		h(
+			'button',
+			{ class: 'sp-row sp-ep sp-continue' + (spResume.uri === spCurrentUri ? ' is-current' : ''), type: 'button', 'data-uri': spResume.uri, onclick: () => spPlay({ uri: spResume.uri, played: false, resumeAt: spResume.progress || 0 }) },
+			h('span', { class: 'sp-row-play', html: icons.play }),
+			h('span', { class: 'sp-row-title' }, spResume.title),
+			h('span', { class: 'sp-row-sub' }, ['Continue', spResume.subtitle, spResume.duration ? `${fmtMin(spResume.duration - (spResume.progress || 0))} left` : ''].filter(Boolean).join(' · ')),
+		);
 	box.replaceChildren(
+		cont || '',
 		h('p', { class: 'sp-head' }, 'Your shows'),
 		h(
 			'ul',
@@ -2945,6 +2967,11 @@ function syncSpotifyUi() {
 	if (spotifyRemote.connected && $('podcast-panel').open && !spLibShown) {
 		spLibShown = true;
 		renderLibrary();
+		spotifyRemote.state().then((st) => {
+			if (!st?.uri) return;
+			spResume = st;
+			if (!spOpenShow) renderLibrary();
+		});
 	}
 	if (live && !spPoll) {
 		refreshNowPlaying();

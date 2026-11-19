@@ -2621,6 +2621,14 @@ dialog p {
 	align-items: center;
 }
 
+.sp-continue {
+	margin-bottom: var(--s3);
+	padding: var(--s3);
+	border: 1px solid var(--rule-strong);
+	border-radius: var(--radius);
+	background: var(--stock-raised);
+}
+
 .sp-row-play {
 	grid-row: span 2;
 	display: grid;

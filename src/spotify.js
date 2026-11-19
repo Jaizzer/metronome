@@ -53,6 +53,7 @@ export function describePlayback(body) {
 	const episode = item.type === 'episode';
 	const images = (episode ? item.images : item.album?.images) || [];
 	return {
+		uri: item.uri || null,
 		playing: Boolean(body.is_playing),
 		title: item.name || '',
 		subtitle: episode ? item.show?.name || '' : (item.artists || []).map((a) => a.name).join(', '),
