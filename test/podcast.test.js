@@ -25,10 +25,16 @@ test('pauses during a running Drill chunk', () => {
 	assert.equal(podcastShouldPlay(base), false);
 });
 
-test('plays in Maintain, when resting, and when stopped', () => {
-	assert.equal(podcastShouldPlay({ ...base, chunkState: 'maintain' }), true);
-	assert.equal(podcastShouldPlay({ ...base, resting: true }), true);
-	assert.equal(podcastShouldPlay({ ...base, running: false }), true);
+test('resumes in Maintain, when resting, and when stopped only after our own pause', () => {
+	assert.equal(podcastShouldPlay({ ...base, chunkState: 'maintain', wePaused: true }), true);
+	assert.equal(podcastShouldPlay({ ...base, resting: true, wePaused: true }), true);
+	assert.equal(podcastShouldPlay({ ...base, running: false, wePaused: true }), true);
+});
+
+test('never starts a podcast the user did not start', () => {
+	assert.equal(podcastShouldPlay({ ...base, chunkState: 'maintain' }), null);
+	assert.equal(podcastShouldPlay({ ...base, resting: true }), null);
+	assert.equal(podcastShouldPlay({ ...base, running: false }), null);
 });
 
 test('manual pause wins over auto-resume', () => {
@@ -50,5 +56,5 @@ test('resumes after our own pause when the context goes away (Stop, non-Song rou
 
 test('user play during Drill wins until the next chunk', () => {
 	assert.equal(podcastShouldPlay({ ...base, userOverride: true }), null);
-	assert.equal(podcastShouldPlay({ ...base, userOverride: true, chunkState: 'maintain' }), true);
+	assert.equal(podcastShouldPlay({ ...base, userOverride: true, chunkState: 'maintain' }), null);
 });

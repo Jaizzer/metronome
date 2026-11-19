@@ -20,7 +20,8 @@ export function parseSpotifyLink(str) {
 // chunkState: 'drill' | 'maintain' | null (null = no Drill/Maintain context).
 // wePaused: the app itself paused the podcast earlier. userOverride: the user
 // pressed play during a Drill chunk, so it stays on until the next chunk.
-// Returns true (play), false (pause) or null (leave it alone).
+// Returns true (play), false (pause) or null (leave it alone). It only ever
+// resumes a podcast the app paused; it never starts one the user didn't.
 export function podcastShouldPlay({
 	autoPause,
 	manualPaused,
@@ -32,9 +33,8 @@ export function podcastShouldPlay({
 }) {
 	if (manualPaused) return false;
 	if (!autoPause || !chunkState) return wePaused ? true : null; // undo our own pause
-	if (!running || resting) return true;
-	if (chunkState === 'drill') return userOverride ? null : false;
-	return true;
+	if (running && !resting && chunkState === 'drill') return userOverride ? null : false;
+	return wePaused ? true : null;
 }
 
 // ---- controller ----
@@ -151,7 +151,7 @@ export function createPodcastPlayer({ mount, onStatus = () => {} }) {
 		// Field cleared: stop the audio and hide the embed.
 		clear() {
 			wantUri = null;
-			pending = null;
+			pending = { play: false, at: Date.now() }; // our pause, not the user's
 			if (controller) {
 				try {
 					controller.pause();
@@ -161,18 +161,23 @@ export function createPodcastPlayer({ mount, onStatus = () => {} }) {
 			}
 			mount.hidden = true;
 		},
-		// Ask the embed to play or pause (auto-pause).
+		// Ask the embed to play or pause (auto-pause). Returns true only when
+		// it paused an embed known to be playing, so the app knows the pause
+		// is its own to undo.
 		setPlaying(play) {
-			if (!controller || !wantUri) return;
-			if (paused === !play) return; // already there
-			if (pending && pending.play === play && Date.now() - pending.at < PENDING_TIMEOUT) return;
+			if (!controller || !wantUri) return false;
+			if (paused === !play) return false; // already there
+			if (pending && pending.play === play && Date.now() - pending.at < PENDING_TIMEOUT) return false;
+			const wasPlaying = paused === false;
 			pending = { play, at: Date.now() };
 			try {
 				if (play) controller.play();
 				else controller.pause();
 			} catch {
 				pending = null;
+				return false;
 			}
+			return !play && wasPlaying;
 		},
 		get ready() {
 			return Boolean(controller) && Boolean(wantUri);

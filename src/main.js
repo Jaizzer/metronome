@@ -2751,8 +2751,12 @@ function syncPodcast() {
 		userOverride: podcastOverride,
 	});
 	if (go === null) return;
-	podcastWePaused = go === false && !podcastManualPaused;
-	podcastPlayer.setPlaying(go);
+	if (go) {
+		podcastWePaused = false;
+		podcastPlayer.setPlaying(true);
+	} else if (podcastPlayer.setPlaying(false) && !podcastManualPaused) {
+		podcastWePaused = true; // only a pause of a playing embed is ours to undo
+	}
 }
 
 function applyPodcastLink(raw, { save = true } = {}) {
