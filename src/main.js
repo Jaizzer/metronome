@@ -2846,7 +2846,7 @@ function spPlay(ep) {
 	podcastOverride = true; // picked by hand: plays until the next chunk
 	const startAt = ep.played ? 0 : ep.resumeAt;
 	if (spPlayHere) {
-		podcastPlayer.load(ep.uri, { startAt, play: true });
+		podcastPlayer.load(ep.uri, { startAt, play: true, video: true });
 		spAct(() => spotifyRemote.setPlaying(false)); // one podcast at a time
 	} else spAct(() => spotifyRemote.playUri(ep.uri, startAt));
 }

@@ -2570,6 +2570,13 @@ dialog p {
 	color: var(--amber);
 }
 
+/* Picked episodes: room for a video podcast (audio ones show big art) */
+.podcast-embed.is-video iframe {
+	height: auto;
+	aspect-ratio: 16 / 10;
+	min-height: 240px;
+}
+
 /* Link + embed: the fallback when the Spotify app isn't connected */
 .podcast-alt {
 	flex: 1 1 100%;

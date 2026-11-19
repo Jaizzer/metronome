@@ -138,17 +138,19 @@ export function createPodcastPlayer({ mount, onStatus = () => {} }) {
 		set onManual(fn) {
 			listeners.manual = fn;
 		},
-		// startAt (ms) reloads at that point; play starts it (picked from the list).
-		async load(uri, { startAt = 0, play = false } = {}) {
+		// startAt (ms) reloads at that point; play starts it (picked from the list);
+		// video asks for the video version of a video podcast.
+		async load(uri, { startAt = 0, play = false, video = false } = {}) {
 			wantUri = uri;
 			mount.hidden = false;
 			const c = await ensure(uri);
 			if (!c || wantUri !== uri) return;
-			if (loadedUri !== uri || startAt) {
+			mount.classList.toggle('is-video', video);
+			if (loadedUri !== uri || startAt || video) {
 				loadedUri = uri;
 				paused = null;
 				pending = null;
-				c.loadUri(uri, false, Math.floor(startAt / 1000));
+				c.loadUri(uri, video, Math.floor(startAt / 1000)); // video: falls back to audio
 			}
 			if (play) {
 				pending = { play: true, at: Date.now() };
