@@ -2430,7 +2430,56 @@ dialog p {
 .sp {
 	flex: 1 1 100%;
 	display: grid;
+	gap: var(--s4);
+}
+
+.sp-player {
+	display: grid;
 	gap: var(--s3);
+	align-content: start;
+}
+
+.sp-player .podcast-embed {
+	margin: 0;
+}
+
+.sp-foot {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--s2) var(--s4);
+	padding-top: var(--s2);
+	border-top: 1px solid var(--rule);
+}
+
+.sp-link {
+	min-height: var(--tap);
+	border: 0;
+	background: none;
+	color: var(--paper-3);
+	font: inherit;
+	font-size: 14px;
+	text-decoration: underline;
+	text-underline-offset: 3px;
+	cursor: pointer;
+}
+
+.sp-link:hover {
+	color: var(--paper);
+}
+
+@media (min-width: 900px) {
+	.sp {
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		column-gap: var(--s6);
+	}
+	.sp-foot {
+		grid-column: 1 / -1;
+	}
+	.sp-list {
+		max-height: 420px;
+	}
 }
 
 .sp-now {
@@ -2566,8 +2615,38 @@ dialog p {
 	color: var(--paper-3);
 }
 
-.sp-row:hover .sp-row-title {
+.sp-ep {
+	grid-template-columns: 28px minmax(0, 1fr);
+	column-gap: var(--s2);
+	align-items: center;
+}
+
+.sp-row-play {
+	grid-row: span 2;
+	display: grid;
+	place-items: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 50%;
+	border: 1.5px solid var(--rule-strong);
+	color: var(--paper-2);
+}
+
+.sp-row-play svg {
+	width: 12px;
+	height: 12px;
+	fill: currentColor;
+}
+
+.sp-row:hover .sp-row-title,
+.sp-row.is-current .sp-row-title {
 	color: var(--amber);
+}
+
+.sp-row.is-current .sp-row-play {
+	border-color: var(--amber);
+	background: var(--amber);
+	color: var(--on-ink);
 }
 
 /* Picked episodes: room for a video podcast (audio ones show big art) */

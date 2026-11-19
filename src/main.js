@@ -2792,6 +2792,7 @@ let spEpisodes;
 let spPoll = null;
 let spLibToken = 0;
 let spLibShown = false;
+let spCurrentUri = null; // highlighted in the episode list
 
 const fmtMin = (ms) => `${Math.max(1, Math.round(ms / 60000))} min`;
 
@@ -2845,6 +2846,10 @@ function spPlay(ep) {
 	podcastManualPaused = false;
 	podcastOverride = true; // picked by hand: plays until the next chunk
 	const startAt = ep.played ? 0 : ep.resumeAt;
+	spCurrentUri = ep.uri;
+	for (const row of document.querySelectorAll('#sp-lib .sp-row[data-uri]')) {
+		row.classList.toggle('is-current', row.dataset.uri === ep.uri);
+	}
 	if (spPlayHere) {
 		podcastPlayer.load(ep.uri, { startAt, play: true, video: true });
 		spAct(() => spotifyRemote.setPlaying(false)); // one podcast at a time
@@ -2855,7 +2860,7 @@ function renderPlayWhere() {
 	const sw = $('sp-here');
 	sw.setAttribute('aria-checked', String(spPlayHere));
 	$('sp-now').hidden = spPlayHere; // the embed is the player then
-	$('sp-lib').before($('podcast-embed'));
+	$('sp-player').append($('podcast-embed'));
 	$('podcast-embed').hidden = !spPlayHere || !podcastPlayer.ready;
 }
 
@@ -2893,7 +2898,8 @@ async function renderLibrary() {
 						{},
 						h(
 							'button',
-							{ class: 'sp-row', type: 'button', onclick: () => spPlay(e) },
+							{ class: 'sp-row sp-ep' + (e.uri === spCurrentUri ? ' is-current' : ''), type: 'button', 'data-uri': e.uri, onclick: () => spPlay(e) },
+							h('span', { class: 'sp-row-play', html: icons.play }),
 							h('span', { class: 'sp-row-title' }, e.name),
 							h('span', { class: 'sp-row-sub' }, [e.date, e.played ? 'Played' : e.resumeAt ? `${fmtMin(e.duration - e.resumeAt)} left` : fmtMin(e.duration)].filter(Boolean).join(' · ')),
 						),
@@ -2952,7 +2958,7 @@ function syncSpotifyUi() {
 function renderSpotifyLogin() {
 	syncSpotifyUi();
 	const on = spotifyRemote.connected;
-	$('spotify-connect').textContent = on ? 'Disconnect Spotify app' : 'Connect Spotify app';
+	$('spotify-connect').hidden = on;
 	$('podcast-link-row').hidden = on;
 	if (on) {
 		renderPlayWhere();
@@ -3022,16 +3028,17 @@ function applyPodcastLink(raw, { save = true } = {}) {
 		renderPlayWhere();
 		syncSpotifyUi();
 	};
-	$('spotify-connect').onclick = () => {
-		if (spotifyRemote.connected) {
-			spotifyRemote.logout();
-			podcastWePaused = false;
-			spShows = spEpisodes = undefined;
-			spOpenShow = null;
-			spLibShown = false;
-			$('podcast-msg').textContent = '';
-			renderSpotifyLogin();
-		} else spotifyRemote.login();
+	$('spotify-connect').onclick = () => spotifyRemote.login();
+	$('spotify-disconnect').onclick = () => {
+		podcastPlayer.clear();
+		spotifyRemote.logout();
+		podcastWePaused = false;
+		spShows = spEpisodes = undefined;
+		spOpenShow = null;
+		spLibShown = false;
+		spCurrentUri = null;
+		$('podcast-msg').textContent = '';
+		renderSpotifyLogin();
 	};
 	const linked = () => !spotifyRemote.connected;
 	// Lazy: Spotify's script loads only when the panel opens or a link was saved.

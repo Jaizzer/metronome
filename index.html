@@ -184,13 +184,18 @@
 			<details id="podcast-panel" class="player-more podcast-panel">
 				<summary id="podcast-summary">Podcast</summary>
 				<div class="player-settings">
-					<button id="spotify-connect" class="btn btn-quiet" type="button">Connect Spotify app</button>
+					<button id="spotify-connect" class="btn" type="button">Connect Spotify</button>
 					<div id="spotify-ui" class="sp" hidden>
-						<button id="sp-here" class="switch" type="button" role="switch" aria-checked="true">
-							<span class="switch-track" aria-hidden="true"></span>Play inside the metronome
-						</button>
-						<div id="sp-now" class="sp-now"></div>
+						<div id="sp-player" class="sp-player">
+							<div id="sp-now" class="sp-now"></div>
+						</div>
 						<div id="sp-lib" class="sp-lib"></div>
+						<div class="sp-foot">
+							<button id="sp-here" class="switch" type="button" role="switch" aria-checked="true">
+								<span class="switch-track" aria-hidden="true"></span>Play inside the metronome
+							</button>
+							<button id="spotify-disconnect" class="sp-link" type="button">Disconnect Spotify</button>
+						</div>
 					</div>
 					<details id="podcast-link-row" class="podcast-alt">
 						<summary>Or paste a Spotify link</summary>
