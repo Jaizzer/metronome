@@ -138,15 +138,22 @@ export function createPodcastPlayer({ mount, onStatus = () => {} }) {
 		set onManual(fn) {
 			listeners.manual = fn;
 		},
-		async load(uri) {
+		// startAt (ms) reloads at that point; play starts it (picked from the list).
+		async load(uri, { startAt = 0, play = false } = {}) {
 			wantUri = uri;
 			mount.hidden = false;
 			const c = await ensure(uri);
-			if (!c || wantUri !== uri || loadedUri === uri) return;
-			loadedUri = uri;
-			paused = null;
-			pending = null;
-			c.loadUri(uri);
+			if (!c || wantUri !== uri) return;
+			if (loadedUri !== uri || startAt) {
+				loadedUri = uri;
+				paused = null;
+				pending = null;
+				c.loadUri(uri, false, Math.floor(startAt / 1000));
+			}
+			if (play) {
+				pending = { play: true, at: Date.now() };
+				c.play();
+			}
 		},
 		// Field cleared: stop the audio and hide the embed.
 		clear() {

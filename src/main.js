@@ -2748,8 +2748,11 @@ const spotifyRemote = createSpotifyRemote({
 });
 let remoteQueue = Promise.resolve();
 
+// Connected: play inside this page (embed, default) or on the Spotify app.
+let spPlayHere = podStore.get('spotify.playHere', '1') !== '0';
+
 function podcastTarget() {
-	if (spotifyRemote.connected) return 'remote';
+	if (spotifyRemote.connected && !spPlayHere) return 'remote';
 	return podcastPlayer.ready ? 'embed' : null;
 }
 
@@ -2788,6 +2791,7 @@ let spOpenShow = null; // { id, name } while its episodes are listed
 let spEpisodes;
 let spPoll = null;
 let spLibToken = 0;
+let spLibShown = false;
 
 const fmtMin = (ms) => `${Math.max(1, Math.round(ms / 60000))} min`;
 
@@ -2840,7 +2844,19 @@ function spPlay(ep) {
 	podcastWePaused = false;
 	podcastManualPaused = false;
 	podcastOverride = true; // picked by hand: plays until the next chunk
-	spAct(() => spotifyRemote.playUri(ep.uri, ep.played ? 0 : ep.resumeAt));
+	const startAt = ep.played ? 0 : ep.resumeAt;
+	if (spPlayHere) {
+		podcastPlayer.load(ep.uri, { startAt, play: true });
+		spAct(() => spotifyRemote.setPlaying(false)); // one podcast at a time
+	} else spAct(() => spotifyRemote.playUri(ep.uri, startAt));
+}
+
+function renderPlayWhere() {
+	const sw = $('sp-here');
+	sw.setAttribute('aria-checked', String(spPlayHere));
+	$('sp-now').hidden = spPlayHere; // the embed is the player then
+	$('sp-lib').before($('podcast-embed'));
+	$('podcast-embed').hidden = !spPlayHere || !podcastPlayer.ready;
 }
 
 const spMsg = (text, ...extra) => [h('p', { class: 'sp-empty' }, text), ...extra];
@@ -2918,11 +2934,14 @@ async function renderLibrary() {
 
 // Poll the now-playing card only while the panel is open and connected.
 function syncSpotifyUi() {
-	const live = spotifyRemote.connected && $('podcast-panel').open;
+	const live = spotifyRemote.connected && $('podcast-panel').open && !spPlayHere;
 	$('spotify-ui').hidden = !spotifyRemote.connected;
+	if (spotifyRemote.connected && $('podcast-panel').open && !spLibShown) {
+		spLibShown = true;
+		renderLibrary();
+	}
 	if (live && !spPoll) {
 		refreshNowPlaying();
-		renderLibrary();
 		spPoll = setInterval(() => !document.hidden && refreshNowPlaying(), 5000);
 	} else if (!live && spPoll) {
 		clearInterval(spPoll);
@@ -2935,9 +2954,13 @@ function renderSpotifyLogin() {
 	const on = spotifyRemote.connected;
 	$('spotify-connect').textContent = on ? 'Disconnect Spotify app' : 'Connect Spotify app';
 	$('podcast-link-row').hidden = on;
-	if (on) $('podcast-embed').hidden = true;
-	else if ($('podcast-url').value.trim()) applyPodcastLink($('podcast-url').value, { save: false });
-	if (on) $('podcast-msg').textContent = '';
+	if (on) {
+		renderPlayWhere();
+		$('podcast-msg').textContent = '';
+		return;
+	}
+	$('podcast-msg').after($('podcast-embed')); // back under the link field
+	if ($('podcast-url').value.trim()) applyPodcastLink($('podcast-url').value, { save: false });
 }
 
 function applyPodcastLink(raw, { save = true } = {}) {
@@ -2991,12 +3014,21 @@ function applyPodcastLink(raw, { save = true } = {}) {
 		podStore.set(KEY_CLICK, clickGain);
 		label();
 	};
+	$('sp-here').onclick = () => {
+		spPlayHere = !spPlayHere;
+		podStore.set('spotify.playHere', spPlayHere ? '1' : '0');
+		podcastWePaused = false;
+		if (!spPlayHere) podcastPlayer.setPlaying(false); // hidden embed must not keep playing
+		renderPlayWhere();
+		syncSpotifyUi();
+	};
 	$('spotify-connect').onclick = () => {
 		if (spotifyRemote.connected) {
 			spotifyRemote.logout();
 			podcastWePaused = false;
 			spShows = spEpisodes = undefined;
 			spOpenShow = null;
+			spLibShown = false;
 			$('podcast-msg').textContent = '';
 			renderSpotifyLogin();
 		} else spotifyRemote.login();
