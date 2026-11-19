@@ -180,6 +180,24 @@
 					<p id="pedal-hint" class="pedal-hint">Pedal: tap ✓ · double-tap ✗ · hold to undo</p>
 				</div>
 			</details>
+
+			<details id="podcast-panel" class="player-more podcast-panel">
+				<summary id="podcast-summary">Podcast</summary>
+				<div class="player-settings">
+					<label class="podcast-link" for="podcast-url">Spotify link
+						<input type="text" id="podcast-url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="open.spotify.com/episode/…">
+					</label>
+					<p id="podcast-msg" class="podcast-msg" role="status"></p>
+					<div id="podcast-embed" class="podcast-embed"></div>
+					<button id="podcast-auto" class="switch" type="button" role="switch" aria-checked="true">
+						<span class="switch-track" aria-hidden="true"></span>Auto-pause while drilling
+					</button>
+					<label class="volume" for="clickGainSlider">Click
+						<input type="range" id="clickGainSlider" min="0" max="2" step="0.05" value="1">
+						<output id="click-gain-pct" for="clickGainSlider">100%</output>
+					</label>
+				</div>
+			</details>
 		</div>
 	</section>
 

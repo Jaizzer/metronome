@@ -7,6 +7,7 @@
 import '@fontsource/barlow-condensed/600.css';
 import '@fontsource/barlow-condensed/700.css';
 import './style.css';
+import { parseSpotifyLink, podcastShouldPlay, createPodcastPlayer, store as podStore, KEY_LINK, KEY_AUTO, KEY_CLICK } from './podcast.js';
 import {
 	signUp,
 	signIn,
@@ -785,7 +786,7 @@ function cueTone(dir) {
 	gain.gain.setValueAtTime(Math.max(0.0001, Math.min(0.5, metVolume * 0.25)), t);
 	gain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
 	osc.connect(gain);
-	gain.connect(audioCtx.destination);
+	gain.connect(clickBus ?? audioCtx.destination);
 	osc.start(t);
 	osc.stop(t + 0.25);
 }
@@ -1151,6 +1152,8 @@ $('volumeSlider').oninput = (e) => {
 
 // ---------------- Audio engine ----------------
 
+let clickBus = null;
+let clickGain = 1;
 let audioCtx,
 	nextTickTime = 0,
 	schedulerInterval,
@@ -1169,6 +1172,28 @@ let sectionStartBPM = 120,
 function initAudio() {
 	if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 	if (audioCtx.state === 'suspended') audioCtx.resume();
+	if (!clickBus) {
+		// Click output: gain (0–200%) -> limiter -> speakers, so 200% doesn't clip.
+		clickBus = audioCtx.createGain();
+		clickBus.gain.value = clickGain;
+		const lim = audioCtx.createDynamicsCompressor();
+		lim.threshold.value = -6;
+		lim.knee.value = 0;
+		lim.ratio.value = 20;
+		lim.attack.value = 0.001;
+		lim.release.value = 0.1;
+		clickBus.connect(lim);
+		lim.connect(audioCtx.destination);
+	}
+}
+
+// iOS: 'ambient' lets the click mix with Spotify instead of stopping it.
+function mixWithOtherAudio() {
+	try {
+		if (navigator.audioSession) navigator.audioSession.type = 'ambient';
+	} catch {
+		/* unsupported */
+	}
 }
 
 function playClick(time, accented) {
@@ -1179,7 +1204,7 @@ function playClick(time, accented) {
 	gain.gain.setValueAtTime(Math.max(0.0001, metVolume), time);
 	gain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
 	osc.connect(gain);
-	gain.connect(audioCtx.destination);
+	gain.connect(clickBus ?? audioCtx.destination);
 	osc.start(time);
 	osc.stop(time + 0.1);
 }
@@ -1229,6 +1254,7 @@ function runSection(index) {
 	totalSectionTime = met.duration;
 	adjustBPMDisplay();
 	updatePlayerUI();
+	syncPodcast();
 	beatCounter = 0;
 	nextTickTime = audioCtx.currentTime + 0.05;
 	updateProgressBar(1);
@@ -1298,6 +1324,7 @@ function togglePause() {
 	if (!isPaused && audioCtx) nextTickTime = audioCtx.currentTime + 0.05; // no catch-up burst
 	renderPlayButton();
 	if (isPaused) lightUpDot(-1);
+	syncPodcast();
 }
 
 function renderPlayButton() {
@@ -1390,6 +1417,7 @@ function updateTally() {
 	);
 	$('undoBtn').disabled = !canUndo();
 	updateSongLine();
+	syncPodcast();
 }
 
 // One line under the beats in song mode: what the next attempt is for.
@@ -1445,6 +1473,7 @@ document.addEventListener('visibilitychange', () => {
 function startRoutine(p, index = 0) {
 	if (!p.metronomes.length) return toast('Add a section first');
 	initAudio();
+	mixWithOtherAudio();
 	prepareSongSession(p);
 	activePractice = p;
 	isPaused = false;
@@ -1472,6 +1501,7 @@ function stopEverything({ finished = false } = {}) {
 	}
 	activePractice = null;
 	activeMetIndex = -1;
+	syncPodcast();
 	showView('builder');
 	renderBuilder();
 	if (finished) toast('Routine finished');
@@ -2679,3 +2709,88 @@ document.querySelector('.ico-bad').outerHTML = icons.cross;
 renderPlayButton();
 
 init();
+
+
+// ---------------- Podcast (src/podcast.js) ----------------
+// Drill / Maintain here = Song mode chunk status (engine.chunkStatus):
+// 'new' and 'bottleneck' chunks are Drill; 'joined' chunks and Runs
+// (cold full runs) are Maintain. Outside Song mode there is no context.
+function podcastChunkState() {
+	const m = playingSection();
+	if (!m || !isSong(activePractice)) return null;
+	if (isRun(m)) return 'maintain';
+	const st = chunkStatus(m, songNow(activePractice)).state;
+	return st === 'joined' ? 'maintain' : 'drill';
+}
+
+let podcastManualPaused = false;
+let podcastAuto = podStore.get(KEY_AUTO, '1') !== '0';
+const podcastPlayer = createPodcastPlayer({
+	mount: $('podcast-embed'),
+	onStatus: (t) => ($('podcast-msg').textContent = t),
+});
+podcastPlayer.onManual = (paused) => {
+	podcastManualPaused = paused; // pressing play again re-enables auto-resume
+	syncPodcast();
+};
+
+function syncPodcast() {
+	if (!podcastPlayer.ready) return;
+	const go = podcastShouldPlay({
+		autoPause: podcastAuto,
+		manualPaused: podcastManualPaused,
+		running: Boolean(activePractice) && view === 'player' && !isPaused,
+		chunkState: podcastChunkState(),
+		resting: false,
+	});
+	if (go !== null) podcastPlayer.setPlaying(go);
+}
+
+function applyPodcastLink(raw, { save = true } = {}) {
+	const msg = $('podcast-msg');
+	if (!raw.trim()) {
+		msg.textContent = '';
+		if (save) podStore.set(KEY_LINK, '');
+		return;
+	}
+	const uri = parseSpotifyLink(raw);
+	if (!uri) {
+		msg.textContent = 'That is not a Spotify episode, show or playlist link.';
+		return;
+	}
+	msg.textContent = '';
+	if (save) podStore.set(KEY_LINK, raw.trim());
+	podcastManualPaused = false;
+	podcastPlayer.load(uri);
+}
+
+{
+	const panel = $('podcast-panel');
+	const input = $('podcast-url');
+	const saved = podStore.get(KEY_LINK, '');
+	input.value = saved;
+	input.addEventListener('input', () => applyPodcastLink(input.value));
+	const sw = $('podcast-auto');
+	sw.setAttribute('aria-checked', String(podcastAuto));
+	sw.onclick = () => {
+		podcastAuto = !podcastAuto;
+		podStore.set(KEY_AUTO, podcastAuto ? '1' : '0');
+		sw.setAttribute('aria-checked', String(podcastAuto));
+		syncPodcast();
+	};
+	const g = parseFloat(podStore.get(KEY_CLICK, '1'));
+	clickGain = Number.isFinite(g) ? Math.min(2, Math.max(0, g)) : 1;
+	const slider = $('clickGainSlider');
+	slider.value = clickGain;
+	const label = () => ($('click-gain-pct').textContent = Math.round(clickGain * 100) + '%');
+	label();
+	slider.oninput = () => {
+		clickGain = parseFloat(slider.value);
+		if (clickBus) clickBus.gain.value = clickGain;
+		podStore.set(KEY_CLICK, clickGain);
+		label();
+	};
+	// Lazy: Spotify's script loads only when the panel opens or a link was saved.
+	panel.addEventListener('toggle', () => panel.open && applyPodcastLink(input.value, { save: false }));
+	if (saved) applyPodcastLink(saved, { save: false });
+}

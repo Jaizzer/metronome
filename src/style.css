@@ -2420,3 +2420,44 @@ dialog p {
 	color: var(--paper);
 	border-color: var(--rule-strong);
 }
+
+/* Podcast panel (player): quiet, same disclosure pattern as Settings */
+.podcast-link {
+	display: flex;
+	flex-direction: column;
+	gap: var(--s1);
+	flex: 1 1 100%;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--paper-2);
+}
+
+.podcast-link input {
+	font-size: 16px;
+	min-height: 44px;
+	padding: 0 var(--s3);
+	color: var(--paper);
+	background: var(--stock-input);
+	border: 1px solid var(--rule-strong);
+	border-radius: var(--radius);
+}
+
+.podcast-msg {
+	flex: 1 1 100%;
+	margin: 0;
+	font-size: 14px;
+	color: var(--paper-2);
+}
+
+.podcast-msg:empty {
+	display: none;
+}
+
+.podcast-embed {
+	flex: 1 1 100%;
+	min-width: 0;
+}
+
+.podcast-embed iframe {
+	border-radius: var(--radius);
+}
