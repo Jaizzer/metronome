@@ -1170,6 +1170,7 @@ let sectionStartBPM = 120,
 	isRamping = false;
 
 function initAudio() {
+	mixWithOtherAudio();
 	if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 	if (audioCtx.state === 'suspended') audioCtx.resume();
 	if (!clickBus) {
@@ -1254,6 +1255,7 @@ function runSection(index) {
 	totalSectionTime = met.duration;
 	adjustBPMDisplay();
 	updatePlayerUI();
+	podcastOverride = false;
 	syncPodcast();
 	beatCounter = 0;
 	nextTickTime = audioCtx.currentTime + 0.05;
@@ -1473,7 +1475,6 @@ document.addEventListener('visibilitychange', () => {
 function startRoutine(p, index = 0) {
 	if (!p.metronomes.length) return toast('Add a section first');
 	initAudio();
-	mixWithOtherAudio();
 	prepareSongSession(p);
 	activePractice = p;
 	isPaused = false;
@@ -2724,13 +2725,17 @@ function podcastChunkState() {
 }
 
 let podcastManualPaused = false;
+let podcastWePaused = false;
+let podcastOverride = false; // user pressed play during Drill: wins until the next chunk
 let podcastAuto = podStore.get(KEY_AUTO, '1') !== '0';
 const podcastPlayer = createPodcastPlayer({
 	mount: $('podcast-embed'),
 	onStatus: (t) => ($('podcast-msg').textContent = t),
 });
 podcastPlayer.onManual = (paused) => {
+	podcastWePaused = false;
 	podcastManualPaused = paused; // pressing play again re-enables auto-resume
+	podcastOverride = !paused;
 	syncPodcast();
 };
 
@@ -2742,8 +2747,12 @@ function syncPodcast() {
 		running: Boolean(activePractice) && view === 'player' && !isPaused,
 		chunkState: podcastChunkState(),
 		resting: false,
+		wePaused: podcastWePaused,
+		userOverride: podcastOverride,
 	});
-	if (go !== null) podcastPlayer.setPlaying(go);
+	if (go === null) return;
+	podcastWePaused = go === false && !podcastManualPaused;
+	podcastPlayer.setPlaying(go);
 }
 
 function applyPodcastLink(raw, { save = true } = {}) {
@@ -2751,6 +2760,8 @@ function applyPodcastLink(raw, { save = true } = {}) {
 	if (!raw.trim()) {
 		msg.textContent = '';
 		if (save) podStore.set(KEY_LINK, '');
+		podcastWePaused = false;
+		podcastPlayer.clear();
 		return;
 	}
 	const uri = parseSpotifyLink(raw);
@@ -2769,7 +2780,11 @@ function applyPodcastLink(raw, { save = true } = {}) {
 	const input = $('podcast-url');
 	const saved = podStore.get(KEY_LINK, '');
 	input.value = saved;
-	input.addEventListener('input', () => applyPodcastLink(input.value));
+	let linkTimer;
+	input.addEventListener('input', () => {
+		clearTimeout(linkTimer);
+		linkTimer = setTimeout(() => applyPodcastLink(input.value), 400);
+	});
 	const sw = $('podcast-auto');
 	sw.setAttribute('aria-checked', String(podcastAuto));
 	sw.onclick = () => {

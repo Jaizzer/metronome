@@ -15,7 +15,7 @@ test('parseSpotifyLink accepts episode/show/playlist links and URIs', () => {
 test('parseSpotifyLink rejects everything else', () => {
 	for (const bad of ['', '  ', 'hello', null, undefined, 42, `https://open.spotify.com/track/${ID}`,
 		`https://evil.com/open.spotify.com/episode/${ID}`, `https://open.spotify.com.evil.com/episode/${ID}`,
-		'https://open.spotify.com/episode/', `spotify:track:${ID}`, 'spotify:episode:short'])
+		'https://open.spotify.com/episode/', `spotify:track:${ID}`, 'spotify:episode:short', `https://open.spotify.com/episode/${ID}extra1234`])
 		assert.equal(parseSpotifyLink(bad), null, String(bad));
 });
 
@@ -39,4 +39,16 @@ test('manual pause wins over auto-resume', () => {
 test('does nothing with auto-pause off or without Drill/Maintain context', () => {
 	assert.equal(podcastShouldPlay({ ...base, autoPause: false }), null);
 	assert.equal(podcastShouldPlay({ ...base, chunkState: null }), null);
+});
+
+test('resumes after our own pause when the context goes away (Stop, non-Song routine)', () => {
+	assert.equal(podcastShouldPlay({ ...base, chunkState: null, running: false, wePaused: true }), true);
+	assert.equal(podcastShouldPlay({ ...base, chunkState: null, wePaused: false }), null);
+	assert.equal(podcastShouldPlay({ ...base, autoPause: false, wePaused: true }), true);
+	assert.equal(podcastShouldPlay({ ...base, chunkState: null, wePaused: true, manualPaused: true }), false);
+});
+
+test('user play during Drill wins until the next chunk', () => {
+	assert.equal(podcastShouldPlay({ ...base, userOverride: true }), null);
+	assert.equal(podcastShouldPlay({ ...base, userOverride: true, chunkState: 'maintain' }), true);
 });

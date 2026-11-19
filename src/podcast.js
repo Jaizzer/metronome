@@ -1,7 +1,7 @@
 // podcast.js: Spotify podcast panel logic. Pure helpers (tested) + a small
 // controller around the Spotify iFrame API (no Web API, no OAuth, no SDK).
 
-const ID = '[A-Za-z0-9]{10,32}';
+const ID = '[A-Za-z0-9]{22}';
 const KINDS = 'episode|show|playlist';
 
 // Spotify link (open.spotify.com/<kind>/<id>[?si=..], optional intl-xx/ or
@@ -18,13 +18,23 @@ export function parseSpotifyLink(str) {
 }
 
 // chunkState: 'drill' | 'maintain' | null (null = no Drill/Maintain context).
-// Returns true (should play), false (should pause) or null (leave it alone).
-export function podcastShouldPlay({ autoPause, manualPaused, running, chunkState, resting }) {
-	if (!autoPause) return null;
+// wePaused: the app itself paused the podcast earlier. userOverride: the user
+// pressed play during a Drill chunk, so it stays on until the next chunk.
+// Returns true (play), false (pause) or null (leave it alone).
+export function podcastShouldPlay({
+	autoPause,
+	manualPaused,
+	running,
+	chunkState,
+	resting,
+	wePaused = false,
+	userOverride = false,
+}) {
 	if (manualPaused) return false;
-	if (!chunkState) return null;
+	if (!autoPause || !chunkState) return wePaused ? true : null; // undo our own pause
 	if (!running || resting) return true;
-	return chunkState !== 'drill';
+	if (chunkState === 'drill') return userOverride ? null : false;
+	return true;
 }
 
 // ---- controller ----
@@ -69,51 +79,58 @@ function loadApi() {
 	return apiPromise;
 }
 
-// opts: { mount: element, onStatus(text) }. Returns { load(uri), setPlaying(bool), onManual }.
+const CREATE_TIMEOUT = 10000;
+const PENDING_TIMEOUT = 5000;
+
+// opts: { mount: element, onStatus(text) }.
 export function createPodcastPlayer({ mount, onStatus = () => {} }) {
 	let controller = null;
 	let creating = null;
-	let uri = null;
-	let wantPlay = null; // last state we asked for (to tell our pauses from the user's)
-	let expectUntil = 0;
-	let userPaused = null; // null until the first update (baseline, not a user action)
-	let listeners = { manual: () => {} };
+	let loadedUri = null; // what the embed currently holds
+	let wantUri = null; // what the user last asked for
+	let paused = null; // last known state of the embed (null = unknown)
+	let pending = null; // { play, at }: our own request, not yet confirmed
+	const listeners = { manual: () => {} };
 
-	async function ensure(firstUri) {
-		if (controller) return controller;
+	function onUpdate(e) {
+		const nowPaused = Boolean(e?.data?.isPaused);
+		if (pending && Date.now() - pending.at > PENDING_TIMEOUT) pending = null;
+		const first = paused === null;
+		if (nowPaused === paused) return;
+		paused = nowPaused;
+		if (pending && pending.play === !nowPaused) {
+			pending = null; // the answer to our request
+			return;
+		}
+		pending = null;
+		if (!first) listeners.manual(nowPaused); // the user pressed play/pause in the embed
+	}
+
+	function ensure(firstUri) {
+		if (controller) return Promise.resolve(controller);
 		if (creating) return creating;
-		creating = loadApi()
-			.then(
-				(api) =>
-					new Promise((resolve) => {
-						const el = document.createElement('div');
-						mount.replaceChildren(el);
-						api.createController(el, { uri: firstUri, width: '100%', height: 152 }, (c) => {
-							controller = c;
-							c.addListener('playback_update', (e) => {
-								const paused = Boolean(e?.data?.isPaused);
-								const ours = Date.now() < expectUntil && wantPlay === !paused;
-								if (ours) {
-									userPaused = paused;
-									return;
-								}
-								// The user pressed play/pause in the embed.
-								const first = userPaused === null;
-								if (paused !== userPaused) {
-									userPaused = paused;
-									wantPlay = null;
-									if (!first) listeners.manual(paused);
-								}
-							});
-							resolve(c);
-						});
-					}),
-			)
-			.catch(() => {
-				creating = null;
-				onStatus('Could not load Spotify. Check your connection.');
-				return null;
-			});
+		const make = loadApi().then(
+			(api) =>
+				new Promise((resolve) => {
+					const el = document.createElement('div');
+					mount.replaceChildren(el);
+					api.createController(el, { uri: firstUri, width: '100%', height: 152 }, (c) => {
+						controller = c;
+						loadedUri = firstUri;
+						c.addListener('playback_update', onUpdate);
+						resolve(c);
+					});
+				}),
+		);
+		const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), CREATE_TIMEOUT));
+		creating = Promise.race([make, timeout]).catch(() => {
+			creating = null; // allow a retry
+			onStatus("Spotify didn't load. Check your connection and try again.");
+			return null;
+		});
+		creating.then(() => {
+			creating = null;
+		});
 		return creating;
 	}
 
@@ -121,28 +138,44 @@ export function createPodcastPlayer({ mount, onStatus = () => {} }) {
 		set onManual(fn) {
 			listeners.manual = fn;
 		},
-		async load(newUri) {
-			if (newUri === uri && controller) return;
-			uri = newUri;
-			userPaused = null;
-			wantPlay = null;
-			if (!controller) await ensure(newUri);
-			else controller.loadUri(newUri);
+		async load(uri) {
+			wantUri = uri;
+			mount.hidden = false;
+			const c = await ensure(uri);
+			if (!c || wantUri !== uri || loadedUri === uri) return;
+			loadedUri = uri;
+			paused = null;
+			pending = null;
+			c.loadUri(uri);
 		},
-		// Ask the embed to play or pause (auto-pause). Ignored until the player exists.
+		// Field cleared: stop the audio and hide the embed.
+		clear() {
+			wantUri = null;
+			pending = null;
+			if (controller) {
+				try {
+					controller.pause();
+				} catch {
+					/* not ready */
+				}
+			}
+			mount.hidden = true;
+		},
+		// Ask the embed to play or pause (auto-pause).
 		setPlaying(play) {
-			if (!controller || wantPlay === play) return;
-			wantPlay = play;
-			expectUntil = Date.now() + 1500;
+			if (!controller || !wantUri) return;
+			if (paused === !play) return; // already there
+			if (pending && pending.play === play && Date.now() - pending.at < PENDING_TIMEOUT) return;
+			pending = { play, at: Date.now() };
 			try {
 				if (play) controller.play();
 				else controller.pause();
 			} catch {
-				/* embed not ready */
+				pending = null;
 			}
 		},
 		get ready() {
-			return Boolean(controller);
+			return Boolean(controller) && Boolean(wantUri);
 		},
 	};
 }
