@@ -8,6 +8,7 @@ import '@fontsource/barlow-condensed/600.css';
 import '@fontsource/barlow-condensed/700.css';
 import './style.css';
 import { parseSpotifyLink, podcastShouldPlay, createPodcastPlayer, store as podStore, KEY_LINK, KEY_AUTO, KEY_CLICK } from './podcast.js';
+import { createSpotifyRemote } from './spotify.js';
 import {
 	signUp,
 	signIn,
@@ -2739,8 +2740,22 @@ podcastPlayer.onManual = (paused) => {
 	syncPodcast();
 };
 
+// Logged in to Spotify: drive the Spotify app itself (Web API) instead of
+// the embed. Calls are async, so they run one after another.
+const spotifyRemote = createSpotifyRemote({
+	redirectUri: location.origin + '/',
+	onStatus: (t) => ($('podcast-msg').textContent = t),
+});
+let remoteQueue = Promise.resolve();
+
+function podcastTarget() {
+	if (spotifyRemote.connected) return 'remote';
+	return podcastPlayer.ready ? 'embed' : null;
+}
+
 function syncPodcast() {
-	if (!podcastPlayer.ready) return;
+	const target = podcastTarget();
+	if (!target) return;
 	const go = podcastShouldPlay({
 		autoPause: podcastAuto,
 		manualPaused: podcastManualPaused,
@@ -2751,12 +2766,28 @@ function syncPodcast() {
 		userOverride: podcastOverride,
 	});
 	if (go === null) return;
+	if (target === 'remote') {
+		if (go) podcastWePaused = false;
+		remoteQueue = remoteQueue.then(async () => {
+			if (spotifyRemote.connected && (await spotifyRemote.setPlaying(go)) && !podcastManualPaused) podcastWePaused = true;
+		});
+		return;
+	}
 	if (go) {
 		podcastWePaused = false;
 		podcastPlayer.setPlaying(true);
 	} else if (podcastPlayer.setPlaying(false) && !podcastManualPaused) {
 		podcastWePaused = true; // only a pause of a playing embed is ours to undo
 	}
+}
+
+function renderSpotifyLogin() {
+	const on = spotifyRemote.connected;
+	$('spotify-connect').textContent = on ? 'Disconnect Spotify app' : 'Connect Spotify app';
+	$('podcast-link-row').hidden = on;
+	if (on) $('podcast-embed').hidden = true;
+	else if ($('podcast-url').value.trim()) applyPodcastLink($('podcast-url').value, { save: false });
+	if (on) $('podcast-msg').textContent = 'Controlling the Spotify app. Play something there.';
 }
 
 function applyPodcastLink(raw, { save = true } = {}) {
@@ -2809,7 +2840,25 @@ function applyPodcastLink(raw, { save = true } = {}) {
 		podStore.set(KEY_CLICK, clickGain);
 		label();
 	};
+	$('spotify-connect').onclick = () => {
+		if (spotifyRemote.connected) {
+			spotifyRemote.logout();
+			podcastWePaused = false;
+			$('podcast-msg').textContent = '';
+			renderSpotifyLogin();
+		} else spotifyRemote.login();
+	};
+	const linked = () => !spotifyRemote.connected;
 	// Lazy: Spotify's script loads only when the panel opens or a link was saved.
-	panel.addEventListener('toggle', () => panel.open && applyPodcastLink(input.value, { save: false }));
-	if (saved) applyPodcastLink(saved, { save: false });
+	panel.addEventListener('toggle', () => panel.open && linked() && applyPodcastLink(input.value, { save: false }));
+	if (saved && linked()) applyPodcastLink(saved, { save: false });
+	renderSpotifyLogin();
+	// Back from Spotify's login page: finish, clean the URL, open the panel.
+	if (/[?&]state=/.test(location.search)) {
+		spotifyRemote.finishLogin(location.search).then((ok) => {
+			history.replaceState(null, '', location.pathname + location.hash);
+			if (ok) panel.open = true;
+			renderSpotifyLogin();
+		});
+	}
 }
