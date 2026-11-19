@@ -2815,6 +2815,7 @@ function applyPodcastLink(raw, { save = true } = {}) {
 	const input = $('podcast-url');
 	const saved = podStore.get(KEY_LINK, '');
 	input.value = saved;
+	$('podcast-link-row').open = Boolean(saved);
 	let linkTimer;
 	input.addEventListener('input', () => {
 		clearTimeout(linkTimer);

@@ -2422,6 +2422,25 @@ dialog p {
 }
 
 /* Podcast panel (player): quiet, same disclosure pattern as Settings */
+/* Link + embed: the fallback when the Spotify app isn't connected */
+.podcast-alt {
+	flex: 1 1 100%;
+}
+
+.podcast-alt summary {
+	min-height: 40px;
+	font-size: 14px;
+	font-weight: 500;
+}
+
+.podcast-alt:not([open]) summary::after {
+	transform: rotate(45deg) translate(-2px, -2px);
+}
+
+.podcast-alt[open] summary::after {
+	transform: rotate(225deg) translate(-2px, -2px);
+}
+
 .podcast-link {
 	display: flex;
 	flex-direction: column;

@@ -185,9 +185,12 @@
 				<summary id="podcast-summary">Podcast</summary>
 				<div class="player-settings">
 					<button id="spotify-connect" class="btn btn-quiet" type="button">Connect Spotify app</button>
-					<label id="podcast-link-row" class="podcast-link" for="podcast-url">Spotify link
-						<input type="text" id="podcast-url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="open.spotify.com/episode/…">
-					</label>
+					<details id="podcast-link-row" class="podcast-alt">
+						<summary>Or paste a Spotify link</summary>
+						<label class="podcast-link" for="podcast-url">Spotify link
+							<input type="text" id="podcast-url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="open.spotify.com/episode/…">
+						</label>
+					</details>
 					<p id="podcast-msg" class="podcast-msg" role="status"></p>
 					<div id="podcast-embed" class="podcast-embed"></div>
 					<button id="podcast-auto" class="switch" type="button" role="switch" aria-checked="true">
