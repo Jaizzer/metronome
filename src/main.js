@@ -2846,7 +2846,22 @@ function renderNowPlaying() {
 			h('button', { class: 'sp-play', type: 'button', 'aria-label': spNow.playing ? 'Pause' : 'Play', onclick: toggle, html: spNow.playing ? icons.pause : icons.play }),
 			h('button', { class: 'btn btn-quiet', type: 'button', 'aria-label': 'Forward 15 seconds', onclick: () => spAct(() => spotifyRemote.seekBy(15000)) }, '+15'),
 		),
+		spNow.volume === null ? '' : spVolumeRow(spNow.volume),
 	);
+}
+
+// Spotify app volume (separate from the click). Sent 300 ms after the last move.
+let spVolTimer;
+function spVolumeRow(vol) {
+	const out = h('output', {}, `${vol}%`);
+	const input = h('input', { type: 'range', min: '0', max: '100', step: '1', value: String(vol), 'aria-label': 'Spotify volume' });
+	input.oninput = () => {
+		out.textContent = `${input.value}%`;
+		if (spNow) spNow.volume = Number(input.value); // the 5 s poll must not snap it back
+		clearTimeout(spVolTimer);
+		spVolTimer = setTimeout(() => spAct(() => spotifyRemote.setVolume(Number(input.value))), 300);
+	};
+	return h('label', { class: 'volume sp-vol' }, 'Spotify', input, out);
 }
 
 function spPlay(ep) {

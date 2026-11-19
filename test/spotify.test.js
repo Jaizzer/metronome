@@ -149,7 +149,7 @@ test('describePlayback reads episodes and tracks, null when idle', () => {
 			device: { name: 'iPhone' },
 			item: { type: 'episode', name: 'Ep 1', duration_ms: 3600000, show: { name: 'Show' }, images: [{ url: 'big' }, { url: 'small' }] },
 		}),
-		{ uri: null, playing: true, title: 'Ep 1', subtitle: 'Show', image: 'small', device: 'iPhone', progress: 61000, duration: 3600000 },
+		{ uri: null, playing: true, title: 'Ep 1', subtitle: 'Show', image: 'small', device: 'iPhone', volume: null, progress: 61000, duration: 3600000 },
 	);
 	const t = describePlayback({
 		is_playing: false,
@@ -209,4 +209,15 @@ test('playUri starts an episode where it left off on the remembered device', asy
 	const c = fetch.calls.at(-1);
 	assert.equal(c.url.searchParams.get('device_id'), 'phone');
 	assert.deepEqual(JSON.parse(c.opts.body), { uris: ['spotify:episode:e1'], position_ms: 120000 });
+});
+
+test('setVolume clamps and reports a device that refuses', async () => {
+	const now = 1;
+	let msg = '';
+	const fetch = fakeFetch({ 'PUT /v1/me/player/volume': (u) => [u.searchParams.get('volume_percent') === '100' ? 403 : 204] });
+	const r = createSpotifyRemote({ clientId: 'c', redirectUri: 'r', fetch, store: memStore(fresh(now)), now: () => now, onStatus: (t) => (msg = t) });
+	assert.equal(await r.setVolume(40.4), true);
+	assert.equal(fetch.calls.at(-1).url.searchParams.get('volume_percent'), '40');
+	assert.equal(await r.setVolume(150), false);
+	assert.match(msg, /volume/i);
 });

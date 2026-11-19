@@ -59,6 +59,7 @@ export function describePlayback(body) {
 		subtitle: episode ? item.show?.name || '' : (item.artists || []).map((a) => a.name).join(', '),
 		image: smallest(images),
 		device: body.device?.name || '',
+		volume: body.device?.volume_percent ?? null,
 		progress: body.progress_ms || 0,
 		duration: item.duration_ms || 0,
 	};
@@ -287,6 +288,14 @@ export function createSpotifyRemote({
 			const body = await res.json().catch(() => null);
 			if (body?.device?.id) store.set(KEY_DEVICE, body.device.id);
 			return describePlayback(body);
+		},
+
+		// Spotify app volume, 0-100. Some devices (often iPhones) refuse it.
+		async setVolume(pct) {
+			const v = String(Math.round(Math.min(100, Math.max(0, pct))));
+			const res = await call('PUT', '/me/player/volume', { volume_percent: v });
+			if (res && res.status === 403) onStatus("This device doesn't let apps change Spotify's volume. Use the phone buttons.");
+			return Boolean(res && res.ok);
 		},
 
 		// Jump back/forward in the current item (podcasts: ±15 s).

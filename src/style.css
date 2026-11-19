@@ -2554,6 +2554,10 @@ dialog p {
 	fill: currentColor;
 }
 
+.sp-vol {
+	grid-column: 1 / -1;
+}
+
 .sp-head,
 .sp-empty {
 	margin: 0;
