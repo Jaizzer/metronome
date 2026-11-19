@@ -1614,10 +1614,11 @@ input[type='range']:focus-visible {
 			'time tab'
 			'transport tab'
 			'. tab'
-			'settings settings';
+			'settings settings'
+			'podcast podcast';
 		/* The Tab panel (right column) can be tall: its extra height goes to
 		   the flexible 5th row, not between the clock and the transport. */
-		grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+		grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto;
 		column-gap: var(--s7);
 		align-content: start;
 	}
@@ -1642,6 +1643,9 @@ input[type='range']:focus-visible {
 	}
 	.player-more {
 		grid-area: settings;
+	}
+	.podcast-panel {
+		grid-area: podcast;
 	}
 	.tab-panel {
 		grid-area: tab;
