@@ -7,6 +7,7 @@
 import '@fontsource/barlow-condensed/600.css';
 import '@fontsource/barlow-condensed/700.css';
 import './style.css';
+import { createVoice } from './voice.js';
 import { parseSpotifyLink, podcastShouldPlay, spotifyVolumeMode, createPodcastPlayer, store as podStore, KEY_LINK, KEY_AUTO, KEY_CLICK } from './podcast.js';
 import { createSpotifyRemote } from './spotify.js';
 import {
@@ -468,11 +469,13 @@ window.addEventListener('online', () => scheduleCountFlushes(0));
 
 const VIEWS = ['auth', 'verify', 'builder', 'player', 'importer', 'tabplayer'];
 let view = 'auth';
+let syncVoice = () => {}; // set once voice is wired (below)
 
 function showView(name) {
 	view = name;
 	for (const v of VIEWS) $(v).hidden = v !== name;
 	window.scrollTo(0, 0);
+	syncVoice();
 }
 
 let toastTimer = null;
@@ -869,7 +872,8 @@ setInterval(() => {
 
 // target: captured when the pedal was pressed (so a section change during
 // the double-tap window can't steal the record); defaults to "now".
-function record(kind, target = currentTarget()) {
+// heard: the spoken word, when voice recorded it (shown in the toast).
+function record(kind, target = currentTarget(), heard = '') {
 	// The Tab player with no chunk to record to: nothing is counted.
 	if (target?.none) return toast('Select a chunk to record', '', 1800);
 	const entry = recorder.record(kind, target);
@@ -892,9 +896,10 @@ function record(kind, target = currentTarget()) {
 	strike(good ? 'success-zone' : 'fail-zone', 'is-struck', 450);
 	strike(good ? 'bar-good' : 'bar-bad', 'is-struck', 450);
 	if (view === 'tabplayer') tabPlayer?.refresh(); // live speed + record line
-	if (songMsg) return toast(songMsg, '', 2200);
+	const said = heard ? `Heard “${heard}” · ` : '';
+	if (songMsg) return toast(said + songMsg, '', 2200);
 	const where = m?.name ? ` · ${m.name}` : '';
-	toast(`${good ? '✓ Good run' : '✗ Bad run'}${where}`, good ? 'good' : 'bad');
+	toast(`${said}${good ? '✓ Good run' : '✗ Bad run'}${where}`, good ? 'good' : 'bad');
 }
 
 function undoLast() {
@@ -968,6 +973,85 @@ const pedal = createPedal({
 		}
 	},
 });
+
+// ---------------- Voice ----------------
+// Same paths as the pedal; the target is captured when the word is heard.
+
+const VOICE_KEY = 'voice.on';
+let voiceWanted = podStore.get(VOICE_KEY, '0') === '1';
+
+// A short blip so a heard word is noticed without looking.
+function voiceTone(good) {
+	if (!audioCtx || audioCtx.state !== 'running') return;
+	const t = audioCtx.currentTime;
+	const osc = audioCtx.createOscillator();
+	const g = audioCtx.createGain();
+	osc.frequency.value = good ? 1320 : 660;
+	g.gain.setValueAtTime(0.0001, t);
+	g.gain.exponentialRampToValueAtTime(0.2, t + 0.005);
+	g.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+	osc.connect(g).connect(audioCtx.destination);
+	osc.start(t);
+	osc.stop(t + 0.09);
+}
+
+function onVoiceCommand(cmd) {
+	if (!currentSession || $('modal').open || (view !== 'player' && view !== 'tabplayer')) return;
+	voiceTone(cmd !== 'miss' && cmd !== 'undo');
+	if (cmd === 'good') return record('s', currentTarget(), cmd);
+	if (cmd === 'miss') return record('f', currentTarget(), cmd);
+	if (cmd === 'undo') return undoLast();
+	const heard = `Heard “${cmd}”`;
+	if (view !== 'player') return toast(`${heard}: only in the metronome`, '', 1400);
+	if (cmd === 'next' && !$('nextBtn').disabled) runSection(activeMetIndex + 1);
+	else if (cmd === 'back' && !$('prevBtn').disabled) runSection(activeMetIndex - 1);
+	else if (cmd === 'pause' && !isPaused) togglePause();
+	else if (cmd === 'play' && isPaused) togglePause();
+	else return toast(`${heard}: nothing to do`, '', 1200);
+	toast(heard, '', 1200);
+}
+
+const VOICE_LABEL = { listening: 'Voice listening', off: 'Voice off', error: 'Voice error' };
+function setVoiceDot(state) {
+	const dot = $('voice-dot');
+	dot.dataset.state = state;
+	dot.setAttribute('aria-label', VOICE_LABEL[state]);
+	dot.title = VOICE_LABEL[state];
+	if (state === 'error' && !voice.on) {
+		// Mic refused: switch it off and say so once.
+		voiceWanted = false;
+		podStore.set(VOICE_KEY, '0');
+		renderVoiceToggle();
+		toast('Voice needs the microphone. Allow it in the browser, then turn Voice on.', 'error', 3200);
+	}
+}
+
+const voice = createVoice({ onCommand: onVoiceCommand, onState: setVoiceDot });
+
+function renderVoiceToggle() {
+	const sw = $('voice-toggle');
+	sw.hidden = !voice.supported;
+	sw.setAttribute('aria-checked', String(voiceWanted));
+	$('voice-hint').textContent = voice.supported
+		? 'Say “good” ✓ · “miss” ✗ · “undo” · “next” · “back” · “pause” · “play”'
+		: 'Voice commands need Chrome or Safari.';
+	$('voice-dot').hidden = !voiceWanted;
+}
+
+// Listen only in the metronome and the Tab player, and only when turned on.
+syncVoice = () => {
+	const want = voiceWanted && voice.supported && (view === 'player' || view === 'tabplayer');
+	if (want && !voice.on) voice.start();
+	else if (!want && voice.on) voice.stop();
+};
+
+$('voice-toggle').onclick = () => {
+	voiceWanted = !voiceWanted;
+	podStore.set(VOICE_KEY, voiceWanted ? '1' : '0');
+	renderVoiceToggle();
+	syncVoice(); // the first start asks for the mic, inside this tap
+};
+renderVoiceToggle();
 
 $('bar-good').onclick = () => record('s');
 $('bar-bad').onclick = () => record('f');

@@ -2808,3 +2808,27 @@ dialog p {
 .podcast-embed iframe {
 	border-radius: var(--radius);
 }
+
+/* Voice: a small mic-status dot before the section count. */
+.player-pos {
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--s2);
+}
+
+.voice-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background: var(--paper-3);
+}
+
+.voice-dot[data-state='listening'] {
+	background: var(--good);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 30%, transparent);
+}
+
+.voice-dot[data-state='error'] {
+	background: var(--bad);
+}

@@ -98,7 +98,7 @@
 		<header class="player-top">
 			<button id="stop" class="btn btn-quiet" type="button"></button>
 			<div id="player-title" class="player-title" tabindex="-1"></div>
-			<span id="player-pos" class="player-pos"></span>
+			<span class="player-pos"><span id="voice-dot" class="voice-dot" data-state="off" role="img" aria-label="Voice off" hidden></span><span id="player-pos"></span></span>
 		</header>
 
 		<div class="player-body">
@@ -180,6 +180,10 @@
 						<button id="resetStats" class="btn btn-quiet" type="button">Reset all-time</button>
 					</p>
 					<p id="pedal-hint" class="pedal-hint">Pedal: tap ✓ · double-tap ✗ · hold to undo</p>
+					<button id="voice-toggle" class="switch" type="button" role="switch" aria-checked="false">
+						<span class="switch-track" aria-hidden="true"></span>Voice
+					</button>
+					<p id="voice-hint" class="pedal-hint">Say “good” ✓ · “miss” ✗ · “undo” · “next” · “back” · “pause” · “play”</p>
 				</div>
 			</details>
 
