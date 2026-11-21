@@ -1409,8 +1409,10 @@ input[type='number']::-webkit-outer-spin-button {
 	justify-items: start;
 	align-content: space-between;
 	gap: var(--s2);
-	min-height: 128px;
-	padding: var(--s3) var(--s3) var(--s3);
+	grid-auto-flow: column;
+	align-items: baseline;
+	justify-content: space-between;
+	padding: var(--s2) var(--s3);
 	border-radius: var(--radius);
 	border: 2px solid currentColor;
 	background: var(--stock-raised);
@@ -1443,7 +1445,7 @@ input[type='number']::-webkit-outer-spin-button {
 .panel-count {
 	font-family: var(--font-num);
 	font-weight: 700;
-	font-size: clamp(72px, 22vw, 120px);
+	font-size: clamp(40px, 10vw, 56px);
 	line-height: 0.85;
 	letter-spacing: -0.02em;
 }
@@ -1466,9 +1468,6 @@ input[type='number']::-webkit-outer-spin-button {
 	color: var(--paper-3);
 }
 
-.panel:active {
-	transform: translateY(1px);
-}
 
 .tally-foot {
 	margin: 0;
@@ -1604,54 +1603,137 @@ input[type='range']:focus-visible {
 	outline: 3px solid var(--amber);
 }
 
-/* Desktop: tempo on the left, tally on the right. */
-@media (min-width: 900px) {
+/* The metronome and the Spotify panel share the screen: on wide screens the
+   panel is a side column, on phones a sheet at the bottom. Each scrolls
+   inside itself; the page doesn't. */
+.player-body {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+@media (max-width: 899px) {
 	.player-main {
+		padding-bottom: calc(64px + env(safe-area-inset-bottom));
+	}
+	.podcast-panel {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 20;
+		max-height: 62dvh;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		padding: 0 var(--gutter) env(safe-area-inset-bottom);
+		background: var(--stock);
+		border-top: 2px solid var(--rule-strong);
+		box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.45);
+	}
+	.podcast-panel summary {
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		background: var(--stock);
+	}
+}
+
+@media (min-width: 900px) {
+	.player {
+		height: 100dvh;
+		min-height: 0;
+	}
+	.player-body {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) clamp(340px, 32vw, 440px);
+	}
+	.player-main,
+	.podcast-panel {
+		min-height: 0;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+	.player-main {
+		align-content: start;
+	}
+	/* With a Tab open: tempo and the clock on the left, the tab on the right. */
+	.player-main:has(> .tab-panel:not([hidden])) {
 		grid-template-columns: 1fr 1fr;
 		grid-template-areas:
 			'stops stops'
-			'tempo tally'
+			'tempo tab'
 			'time tab'
 			'transport tab'
-			'. tab'
-			'settings settings'
-			'podcast podcast';
-		/* The Tab panel (right column) can be tall: its extra height goes to
-		   the flexible 5th row, not between the clock and the transport. */
-		grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto;
-		column-gap: var(--s7);
-		align-content: start;
+			'tally tab'
+			'settings settings';
+		grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+		column-gap: var(--s6);
 	}
-	.stops-wrap {
+	.player-main:has(> .tab-panel:not([hidden])) .stops-wrap {
 		grid-area: stops;
 	}
-	.tempo {
+	.player-main:has(> .tab-panel:not([hidden])) .tempo {
 		grid-area: tempo;
 	}
-	.time {
+	.player-main:has(> .tab-panel:not([hidden])) .time {
 		grid-area: time;
 	}
-	.transport {
+	.player-main:has(> .tab-panel:not([hidden])) .transport {
 		grid-area: transport;
 	}
-	.tally {
+	.player-main:has(> .tab-panel:not([hidden])) .tally {
 		grid-area: tally;
 		align-content: start;
 	}
-	.panel {
-		min-height: 220px;
-	}
-	.player-more {
+	.player-main:has(> .tab-panel:not([hidden])) > .player-more {
 		grid-area: settings;
 	}
-	.podcast-panel {
-		grid-area: podcast;
-	}
-	.tab-panel {
+	.player-main:has(> .tab-panel:not([hidden])) .tab-panel {
 		grid-area: tab;
 		align-self: start;
 		margin-top: 0;
 	}
+	.podcast-panel {
+		border-top: 0;
+		border-left: 2px solid var(--rule);
+		padding: var(--s3) var(--s4) var(--s5);
+	}
+	/* Always open here: the summary would only collapse it. */
+	.podcast-panel > summary {
+		display: none;
+	}
+	.podcast-panel .sp {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.podcast-panel .sp-list {
+		max-height: none;
+	}
+}
+
+/* Mix: Click and Spotify side by side, at the top of the panel. */
+.mix {
+	flex: 1 1 100%;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: var(--s2) var(--s4);
+	align-items: center;
+	padding-bottom: var(--s3);
+	border-bottom: 1px solid var(--rule);
+}
+
+.mix .volume {
+	gap: var(--s2);
+}
+
+.sp-mix-note {
+	margin: 0;
+	font-size: 13px;
+	color: var(--paper-2);
+}
+
+.sp-mix-note b {
+	color: var(--paper);
 }
 
 /* ---------- Toast ---------- */

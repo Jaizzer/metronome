@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSpotifyLink, podcastShouldPlay } from '../src/podcast.js';
+import { parseSpotifyLink, podcastShouldPlay, spotifyVolumeMode } from '../src/podcast.js';
 
 const ID = '4rOoJ6Egrf8K2IrywzwOMk';
 
@@ -57,4 +57,14 @@ test('resumes after our own pause when the context goes away (Stop, non-Song rou
 test('user play during Drill wins until the next chunk', () => {
 	assert.equal(podcastShouldPlay({ ...base, userOverride: true }), null);
 	assert.equal(podcastShouldPlay({ ...base, userOverride: true, chunkState: 'maintain' }), null);
+});
+
+test('spotifyVolumeMode: app volume only on a connected Spotify app device that reports one', () => {
+	assert.equal(spotifyVolumeMode({ connected: true, playHere: false, deviceVolume: 40 }), 'app');
+	assert.equal(spotifyVolumeMode({ connected: true, playHere: false, deviceVolume: 0 }), 'app');
+	assert.equal(spotifyVolumeMode({ connected: true, playHere: false, deviceVolume: null }), 'none');
+	assert.equal(spotifyVolumeMode({ connected: true, playHere: false }), 'none');
+	// Embedded player: the Spotify iFrame API has no volume call.
+	assert.equal(spotifyVolumeMode({ connected: true, playHere: true, deviceVolume: 40 }), 'embed');
+	assert.equal(spotifyVolumeMode({ connected: false, playHere: false, deviceVolume: 40 }), 'embed');
 });

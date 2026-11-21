@@ -101,7 +101,8 @@
 			<span id="player-pos" class="player-pos"></span>
 		</header>
 
-		<div class="player-main">
+		<div class="player-body">
+			<div class="player-main">
 			<div class="stops-wrap">
 				<ol id="stops" class="stops" aria-label="Sections"></ol>
 				<div id="stops-compact" class="stops-compact" hidden>
@@ -147,15 +148,16 @@
 			</div>
 
 			<div class="tally">
-				<div id="stats-ui" class="panels">
-					<button id="success-zone" class="panel panel-good" type="button">
+				<!-- Counts only: the pedal records (tap ✓ · double-tap ✗ · hold to undo). -->
+				<div id="stats-ui" class="panels" aria-live="polite">
+					<span id="success-zone" class="panel panel-good">
 						<span class="panel-label"><span class="ico-good"></span>Good</span>
 						<span id="success-count" class="panel-count">0</span>
-					</button>
-					<button id="fail-zone" class="panel panel-bad" type="button">
+					</span>
+					<span id="fail-zone" class="panel panel-bad">
 						<span class="panel-label"><span class="ico-bad"></span>Bad</span>
 						<span id="fail-count" class="panel-count">0</span>
-					</button>
+					</span>
 				</div>
 				<div class="tally-row">
 					<p id="tally-foot" class="tally-foot"></p>
@@ -181,9 +183,18 @@
 				</div>
 			</details>
 
-			<details id="podcast-panel" class="player-more podcast-panel">
+		</div>
+
+			<details id="podcast-panel" class="player-more podcast-panel" aria-label="Spotify">
 				<summary id="podcast-summary">Podcast</summary>
 				<div class="player-settings">
+					<div class="mix" role="group" aria-label="Mix">
+						<label class="volume" for="clickGainSlider">Click
+							<input type="range" id="clickGainSlider" min="0" max="2" step="0.05" value="1">
+							<output id="click-gain-pct" for="clickGainSlider">100%</output>
+						</label>
+						<div id="sp-mix" class="sp-mix"></div>
+					</div>
 					<button id="spotify-connect" class="btn" type="button">Connect Spotify</button>
 					<div id="spotify-ui" class="sp" hidden>
 						<div id="sp-player" class="sp-player">
@@ -208,10 +219,6 @@
 					<button id="podcast-auto" class="switch" type="button" role="switch" aria-checked="true">
 						<span class="switch-track" aria-hidden="true"></span>Auto-pause while drilling
 					</button>
-					<label class="volume" for="clickGainSlider">Click
-						<input type="range" id="clickGainSlider" min="0" max="2" step="0.05" value="1">
-						<output id="click-gain-pct" for="clickGainSlider">100%</output>
-					</label>
 				</div>
 			</details>
 		</div>

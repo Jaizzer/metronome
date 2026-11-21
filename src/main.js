@@ -7,7 +7,7 @@
 import '@fontsource/barlow-condensed/600.css';
 import '@fontsource/barlow-condensed/700.css';
 import './style.css';
-import { parseSpotifyLink, podcastShouldPlay, createPodcastPlayer, store as podStore, KEY_LINK, KEY_AUTO, KEY_CLICK } from './podcast.js';
+import { parseSpotifyLink, podcastShouldPlay, spotifyVolumeMode, createPodcastPlayer, store as podStore, KEY_LINK, KEY_AUTO, KEY_CLICK } from './podcast.js';
 import { createSpotifyRemote } from './spotify.js';
 import {
 	signUp,
@@ -969,8 +969,6 @@ const pedal = createPedal({
 	},
 });
 
-$('success-zone').onclick = () => record('s');
-$('fail-zone').onclick = () => record('f');
 $('bar-good').onclick = () => record('s');
 $('bar-bad').onclick = () => record('f');
 $('undoBtn').onclick = undoLast;
@@ -2846,8 +2844,8 @@ function renderNowPlaying() {
 			h('button', { class: 'sp-play', type: 'button', 'aria-label': spNow.playing ? 'Pause' : 'Play', onclick: toggle, html: spNow.playing ? icons.pause : icons.play }),
 			h('button', { class: 'btn btn-quiet', type: 'button', 'aria-label': 'Forward 15 seconds', onclick: () => spAct(() => spotifyRemote.seekBy(15000)) }, '+15'),
 		),
-		spNow.volume === null ? '' : spVolumeRow(spNow.volume),
 	);
+	renderMix();
 }
 
 // Spotify app volume (separate from the click). Sent 300 ms after the last move.
@@ -2862,6 +2860,29 @@ function spVolumeRow(vol) {
 		spVolTimer = setTimeout(() => spAct(() => spotifyRemote.setVolume(Number(input.value))), 300);
 	};
 	return h('label', { class: 'volume sp-vol' }, 'Spotify', input, out);
+}
+
+// Mix row: Click (Web Audio gain) beside Spotify. Only the Spotify app can
+// take a volume from us; the embedded player has no volume call.
+let spMixMode = null;
+function renderMix() {
+	let mode = spotifyVolumeMode({ connected: spotifyRemote.connected, playHere: spPlayHere, deviceVolume: spNow?.volume ?? null });
+	if (mode === 'none' && !spNow) mode = 'idle';
+	const box = $('sp-mix');
+	const input = box.querySelector('input');
+	if (mode === spMixMode && mode === 'app') {
+		if (input && document.activeElement !== input) {
+			input.value = String(spNow.volume);
+			box.querySelector('output').textContent = `${spNow.volume}%`;
+		}
+		return;
+	}
+	spMixMode = mode;
+	const note = (text) => h('p', { class: 'sp-mix-note' }, h('b', {}, 'Spotify '), text);
+	if (mode === 'app') box.replaceChildren(spVolumeRow(spNow.volume));
+	else if (mode === 'idle') box.replaceChildren(note('volume shows here once the Spotify app plays.'));
+	else if (mode === 'none') box.replaceChildren(note("volume: this device only takes the phone buttons."));
+	else box.replaceChildren(note('volume: device buttons (the player here has no volume control).'));
 }
 
 function spPlay(ep) {
@@ -2889,6 +2910,7 @@ function renderPlayWhere() {
 	$('sp-now').hidden = spPlayHere; // the embed is the player then
 	$('sp-player').append($('podcast-embed'));
 	$('podcast-embed').hidden = !spPlayHere || !podcastPlayer.ready;
+	renderMix();
 }
 
 const spMsg = (text, ...extra) => [h('p', { class: 'sp-empty' }, text), ...extra];
@@ -3007,6 +3029,7 @@ function renderSpotifyLogin() {
 		$('podcast-msg').textContent = '';
 		return;
 	}
+	renderMix();
 	$('podcast-msg').after($('podcast-embed')); // back under the link field
 	if ($('podcast-url').value.trim()) applyPodcastLink($('podcast-url').value, { save: false });
 }
@@ -3089,6 +3112,12 @@ function applyPodcastLink(raw, { save = true } = {}) {
 		if (panel.open && linked()) applyPodcastLink(input.value, { save: false });
 	});
 	if (saved && linked()) applyPodcastLink(saved, { save: false });
+	// Wide screens: the panel is a side column, always open.
+	const side = window.matchMedia('(min-width: 900px)');
+	const keepOpen = () => side.matches && !panel.open && (panel.open = true);
+	keepOpen();
+	side.addEventListener('change', keepOpen);
+	panel.addEventListener('toggle', keepOpen);
 	renderSpotifyLogin();
 	// Back from Spotify's login page: finish, clean the URL, open the panel.
 	if (/[?&]state=/.test(location.search)) {

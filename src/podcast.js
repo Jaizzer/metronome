@@ -37,6 +37,14 @@ export function podcastShouldPlay({
 	return wePaused ? true : null;
 }
 
+// Which Spotify volume the Mix row can offer: 'app' (Web API volume on the
+// Spotify app device), 'none' (that device doesn't report one) or 'embed'
+// (the player inside the metronome: the iFrame API has no volume call).
+export function spotifyVolumeMode({ connected, playHere, deviceVolume = null }) {
+	if (!connected || playHere) return 'embed';
+	return deviceVolume === null ? 'none' : 'app';
+}
+
 // ---- controller ----
 
 const KEY_LINK = 'podcast.link';
