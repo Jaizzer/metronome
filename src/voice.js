@@ -14,15 +14,22 @@
 const WORDS = {
 	good: 'good',
 	goods: 'good',
+	gud: 'good',
 	miss: 'miss',
+	mis: 'miss',
 	missed: 'miss',
+	misses: 'miss',
 	undo: 'undo',
+	undue: 'undo',
 	next: 'next',
 	back: 'back',
 	pause: 'pause',
 	paused: 'pause',
+	paws: 'pause',
 	play: 'play',
 };
+// Sound-alikes are only words nobody says mid-practice: "could" (for good)
+// is left out on purpose, normal talk would record runs.
 
 // Transcript -> commands in the order spoken; anything else is ignored.
 export function parseCommands(text) {
@@ -53,7 +60,10 @@ export function createCommandStream() {
 	};
 }
 
-const RESTART_MS = 250;
+const RESTART_MS = 0; // iOS ends after each phrase: any gap loses words
+const LANG = 'en-US';
+const LOCAL = { langs: [LANG], processLocally: true };
+const BACKOFF_MS = 250; // after an error: 500 ms, 1 s, 2 s… up to 8 s
 const MAX_BACKOFF_MS = 8000;
 
 // onCommand(cmd, heardAt) · onState('listening' | 'off' | 'error')
@@ -68,13 +78,34 @@ export function createVoice({
 	let rec = null;
 	let on = false;
 	let errors = 0; // in a row, for the backoff
+	let local = false; // on-device recognition (Chrome): no network trip
+	let localTried = false;
 	const stream = createCommandStream();
+
+	// Use the browser's on-device model when it has one (installs it if it's
+	// only downloadable). Starts on the cloud meanwhile, then switches.
+	async function tryLocal() {
+		if (localTried || typeof Recognition.available !== 'function') return;
+		localTried = true;
+		try {
+			let st = await Recognition.available(LOCAL);
+			if (st === 'downloadable' && typeof Recognition.install === 'function') {
+				await Recognition.install(LOCAL);
+				st = await Recognition.available(LOCAL);
+			}
+			if (st !== 'available') return;
+			local = true;
+			if (on && rec) rec.stop(); // onend restarts it on-device
+		} catch {
+			/* cloud it is */
+		}
+	}
 
 	function make() {
 		const r = new Recognition();
 		r.continuous = true;
 		r.interimResults = true;
-		r.lang = 'en-US';
+		r.lang = LANG;
 		r.onstart = () => onState('listening');
 		r.onresult = (e) => {
 			errors = 0;
@@ -87,6 +118,10 @@ export function createVoice({
 		};
 		r.onerror = (e) => {
 			if (e.error === 'no-speech' || e.error === 'aborted') return; // normal; onend restarts
+			if (local && e.error !== 'not-allowed') {
+				local = false; // on-device failed: back to the cloud, no error shown
+				return;
+			}
 			if (e.error === 'not-allowed' || e.error === 'service-not-allowed') on = false; // mic refused: stop for good
 			errors++;
 			onState('error');
@@ -97,13 +132,15 @@ export function createVoice({
 				if (!errors) onState('off');
 				return;
 			}
-			const wait = errors ? Math.min(MAX_BACKOFF_MS, RESTART_MS * 2 ** errors) : RESTART_MS;
+			const wait = errors ? Math.min(MAX_BACKOFF_MS, BACKOFF_MS * 2 ** errors) : RESTART_MS;
 			setTimer(() => on && begin(), wait);
 		};
 		return r;
 	}
 
 	function begin() {
+		if (local) rec.processLocally = true;
+		else if (rec.processLocally) rec.processLocally = false;
 		try {
 			rec.start();
 		} catch {
@@ -116,6 +153,9 @@ export function createVoice({
 		get on() {
 			return on;
 		},
+		get local() {
+			return local;
+		},
 		start() {
 			if (!supported) return false;
 			on = true;
@@ -123,6 +163,7 @@ export function createVoice({
 			rec ??= make();
 			stream.reset();
 			begin();
+			tryLocal(); // inside the tap that turned Voice on, so install() is allowed
 			return true;
 		},
 		stop() {

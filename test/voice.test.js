@@ -140,3 +140,79 @@ test('createVoice: network errors back off before restarting', () => {
 	assert.equal(h.states.at(-1), 'error');
 	assert.equal(h.voice.on, true); // still trying
 });
+
+test('parseCommands accepts sound-alike words that are not normal talk', () => {
+	assert.deepEqual(parseCommands('undue'), ['undo']);
+	assert.deepEqual(parseCommands('paws'), ['pause']);
+	assert.deepEqual(parseCommands('mis'), ['miss']);
+	assert.deepEqual(parseCommands('misses'), ['miss']);
+	assert.deepEqual(parseCommands('gud'), ['good']);
+	// "could" stays out: too common in normal talk.
+	assert.deepEqual(parseCommands('could'), []);
+});
+
+test('createVoice: restarts immediately after a normal end (no gap for words)', () => {
+	const h = harness();
+	h.voice.start();
+	h.rec().onend();
+	assert.equal(h.timers[0].ms, 0);
+});
+
+async function flush() {
+	for (let i = 0; i < 5; i++) await Promise.resolve();
+}
+
+test('createVoice: switches to on-device recognition when the browser has it', async () => {
+	const { Rec, made } = fakeRecognition();
+	Rec.available = async (o) => (o.processLocally && o.langs[0] === 'en-US' ? 'available' : 'unavailable');
+	const timers = [];
+	const v = createVoice({ Recognition: Rec, onCommand() {}, setTimer: (fn, ms) => timers.push({ fn, ms }) });
+	v.start();
+	const r = made[0];
+	assert.equal(r.processLocally, undefined); // first start: cloud, no wait
+	await flush();
+	assert.equal(v.local, true);
+	assert.equal(r.stopped, 1); // stopped once to switch
+	r.onend();
+	timers[0].fn();
+	assert.equal(r.processLocally, true);
+});
+
+test('createVoice: installs the on-device model when downloadable', async () => {
+	const { Rec, made } = fakeRecognition();
+	let installed = false;
+	Rec.available = async () => (installed ? 'available' : 'downloadable');
+	Rec.install = async () => (installed = true);
+	const v = createVoice({ Recognition: Rec, onCommand() {}, setTimer: () => {} });
+	v.start();
+	await flush();
+	assert.equal(installed, true);
+	assert.equal(v.local, true);
+	assert.ok(made[0]);
+});
+
+test('createVoice: on-device failure falls back to the cloud, Voice stays on', async () => {
+	const { Rec, made } = fakeRecognition();
+	Rec.available = async () => 'available';
+	const timers = [];
+	const states = [];
+	const v = createVoice({ Recognition: Rec, onCommand() {}, onState: (s) => states.push(s), setTimer: (fn, ms) => timers.push({ fn, ms }) });
+	v.start();
+	await flush();
+	const r = made[0];
+	r.onerror({ error: 'language-not-supported' });
+	r.onend();
+	timers.at(-1).fn();
+	assert.equal(v.local, false);
+	assert.ok(!r.processLocally);
+	assert.equal(v.on, true);
+	assert.notEqual(states.at(-1), 'error');
+});
+
+test('createVoice: no on-device API -> cloud only, nothing breaks', async () => {
+	const { Rec } = fakeRecognition();
+	const v = createVoice({ Recognition: Rec, onCommand() {}, setTimer: () => {} });
+	v.start();
+	await flush();
+	assert.equal(v.local, false);
+});

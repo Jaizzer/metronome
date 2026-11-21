@@ -1015,8 +1015,9 @@ const VOICE_LABEL = { listening: 'Voice listening', off: 'Voice off', error: 'Vo
 function setVoiceDot(state) {
 	const dot = $('voice-dot');
 	dot.dataset.state = state;
-	dot.setAttribute('aria-label', VOICE_LABEL[state]);
-	dot.title = VOICE_LABEL[state];
+	const label = VOICE_LABEL[state] + (state === 'listening' && voice.local ? ' (on device)' : '');
+	dot.setAttribute('aria-label', label);
+	dot.title = label;
 	if (state === 'error' && !voice.on) {
 		// Mic refused: switch it off and say so once.
 		voiceWanted = false;
