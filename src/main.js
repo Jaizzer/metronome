@@ -40,6 +40,7 @@ import { createImporter } from './importer.js';
 import { createTabPanel } from './tabpanel.js';
 import { saveTab, deleteTab, tabRecord, routineTab } from './tabstore.js';
 import { barRange, rangeText } from './slicer.js';
+import { restoreIndex } from './restore.js';
 import {
 	newAttemptId,
 	mergeLog,
@@ -680,7 +681,7 @@ async function bootApp(session) {
 	}
 
 	restoreSelection();
-	slideIndex = Math.max(0, practices.findIndex((p) => p.id === selectedPracticeId));
+	slideIndex = restoreIndex(practices, lsGet(SHOWN_KEY), selectedPracticeId);
 	renderBuilder();
 	applyStatsVisibility();
 	$('volumeSlider').value = metVolume;
@@ -728,6 +729,7 @@ function selectSection(p, section) {
 			SELECTION_KEY,
 			JSON.stringify({ practiceId: p.id, index: p.metronomes.indexOf(section) }),
 		);
+		localStorage.setItem(SHOWN_KEY, JSON.stringify(p.id));
 	} catch {
 		// private mode etc. — selection just won't persist
 	}
@@ -2463,6 +2465,8 @@ function renderBuilder({ keepFocus = false } = {}) {
 const VIEW_KEY = 'metronome:routine-view';
 let routineView = lsGet(VIEW_KEY) === 'slide' ? 'slide' : 'list';
 let slideIndex = 0;
+// The routine on screen survives a reload (swipe, pager and dots don't change the selection).
+const SHOWN_KEY = 'metronome:shown-routine';
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
 function setRoutineView(next) {
@@ -2503,6 +2507,14 @@ function goToSlide(i, smooth = true) {
 
 function updatePager() {
 	const n = practices.length;
+	const shown = practices[slideIndex]?.id;
+	if (shown !== undefined && !booting) {
+		try {
+			localStorage.setItem(SHOWN_KEY, JSON.stringify(shown));
+		} catch {
+			// private mode: the routine just isn't remembered
+		}
+	}
 	$('slide-pos').textContent = n ? `${slideIndex + 1} / ${n}` : '';
 	$('slide-prev').disabled = slideIndex <= 0;
 	$('slide-next').disabled = slideIndex >= n - 1;
