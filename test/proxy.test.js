@@ -59,6 +59,7 @@ test('passes set-auth-jwt through and makes cookies host-only', async () => {
 	assert.equal(res.headers.get('access-control-allow-origin'), null);
 	const cookie = res.headers.getSetCookie()[0];
 	assert.ok(!/domain=/i.test(cookie));
+	assert.match(cookie, /HttpOnly/); // the session token never reaches page JS
 	assert.match(cookie, /Secure/);
 	assert.match(cookie, /SameSite=None/);
 });
