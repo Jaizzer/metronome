@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { base64url, buildAuthUrl, readCallback, createSpotifyRemote, describePlayback, parseShows, parseEpisodes, SCOPES } from '../src/spotify.js';
+import { base64url, buildAuthUrl, readCallback, createSpotifyRemote, describePlayback, parseShows, parseEpisodes, parseRecent, SCOPES } from '../src/spotify.js';
 
 function memStore(init = {}) {
 	const m = new Map(Object.entries(init));
@@ -220,4 +220,36 @@ test('setVolume clamps and reports a device that refuses', async () => {
 	assert.equal(fetch.calls.at(-1).url.searchParams.get('volume_percent'), '40');
 	assert.equal(await r.setVolume(150), false);
 	assert.match(msg, /volume/i);
+});
+
+test('parseRecent keeps the newest play of each track', () => {
+	const track = (id, name) => ({ uri: `spotify:track:${id}`, name, duration_ms: 200000, artists: [{ name: 'A' }, { name: 'B' }], album: { images: [{ url: 'big' }, { url: 'small' }] } });
+	assert.deepEqual(
+		parseRecent({
+			items: [
+				{ track: track('t1', 'One'), played_at: '2026-11-24T10:00:00Z' },
+				{ track: track('t2', 'Two'), played_at: '2026-11-24T09:00:00Z' },
+				{ track: track('t1', 'One'), played_at: '2026-11-24T08:00:00Z' },
+				{ track: null },
+			],
+		}),
+		[
+			{ uri: 'spotify:track:t1', name: 'One', subtitle: 'A, B', image: 'small', duration: 200000 },
+			{ uri: 'spotify:track:t2', name: 'Two', subtitle: 'A, B', image: 'small', duration: 200000 },
+		],
+	);
+	assert.deepEqual(parseRecent(null), []);
+});
+
+test('recentlyPlayed needs its scope and asks Spotify for the latest plays', async () => {
+	assert.match(SCOPES, /user-read-recently-played/);
+	const now = 1;
+	const old = createSpotifyRemote({ clientId: 'c', redirectUri: 'r', fetch: fakeFetch({}), store: memStore(fresh(now)), now: () => now });
+	assert.equal(old.canRecent, false);
+	const fetch = fakeFetch({ 'GET /v1/me/player/recently-played': () => [200, { items: [] }] });
+	const store = memStore({ 'spotify.token': JSON.stringify({ access: 'A', refresh: 'R', expiresAt: 9e15, scope: SCOPES }) });
+	const r = createSpotifyRemote({ clientId: 'c', redirectUri: 'r', fetch, store, now: () => now });
+	assert.equal(r.canRecent, true);
+	assert.deepEqual(await r.recentlyPlayed(), []);
+	assert.equal(fetch.calls.at(-1).url.searchParams.get('limit'), '50');
 });

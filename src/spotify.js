@@ -4,7 +4,7 @@
 // fetch/store/clock so it runs under node --test.
 
 export const CLIENT_ID = 'dc49097b05c7419fb97f58164a753ee2';
-export const SCOPES = 'user-read-playback-state user-modify-playback-state user-library-read user-read-playback-position';
+export const SCOPES = 'user-read-playback-state user-modify-playback-state user-library-read user-read-playback-position user-read-recently-played';
 
 const AUTH_URL = 'https://accounts.spotify.com/authorize';
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
@@ -83,6 +83,20 @@ export function parseEpisodes(body) {
 		played: Boolean(e.resume_point?.fully_played),
 		resumeAt: e.resume_point?.resume_position_ms || 0,
 	}));
+}
+
+// GET /me/player/recently-played body -> one row per track, newest play
+// first (Spotify lists every play, so repeats are dropped). Tracks only:
+// Spotify leaves podcast episodes out of this list.
+export function parseRecent(body) {
+	const seen = new Set();
+	const out = [];
+	for (const t of (body?.items || []).map((i) => i?.track)) {
+		if (!t?.uri || seen.has(t.uri)) continue;
+		seen.add(t.uri);
+		out.push({ uri: t.uri, name: t.name || '', subtitle: (t.artists || []).map((a) => a.name).join(', '), image: smallest(t.album?.images), duration: t.duration_ms || 0 });
+	}
+	return out;
 }
 
 export const localStore = {
@@ -222,6 +236,16 @@ export function createSpotifyRemote({
 		// Logged in with the library scope (older logins need to reconnect).
 		get canBrowse() {
 			return (readToken()?.scope || '').split(' ').includes('user-library-read');
+		},
+
+		// Logged in with the recently-played scope (older logins need to reconnect).
+		get canRecent() {
+			return (readToken()?.scope || '').split(' ').includes('user-read-recently-played');
+		},
+
+		async recentlyPlayed() {
+			const body = await getJson('/me/player/recently-played', { limit: '50' });
+			return body ? parseRecent(body) : null;
 		},
 
 		async savedShows() {

@@ -2882,6 +2882,7 @@ function syncPodcast() {
 // ---- Spotify card + show list (only while connected) ----
 let spNow = null; // describePlayback() of the Spotify app
 let spShows; // undefined = not loaded, null = Spotify refused, [] = none
+let spRecent; // same, for recently played tracks
 let spOpenShow = null; // { id, name } while its episodes are listed
 let spEpisodes;
 let spPoll = null;
@@ -2989,7 +2990,7 @@ function spPlay(ep) {
 	const startAt = ep.played ? 0 : ep.resumeAt;
 	spCurrentUri = ep.uri;
 	if (ep.name) {
-		spResume = { uri: ep.uri, title: ep.name, subtitle: spOpenShow?.name || '', progress: startAt };
+		spResume = { uri: ep.uri, title: ep.name, subtitle: ep.subtitle ?? spOpenShow?.name ?? '', progress: startAt };
 		podStore.set('spotify.last', JSON.stringify(spResume));
 	}
 	for (const row of document.querySelectorAll('#sp-lib .sp-row[data-uri]')) {
@@ -3024,7 +3025,7 @@ async function renderLibrary() {
 		);
 		return;
 	}
-	const retry = h('button', { class: 'btn btn-quiet', type: 'button', onclick: () => ((spShows = spEpisodes = undefined), renderLibrary()) }, 'Try again');
+	const retry = h('button', { class: 'btn btn-quiet', type: 'button', onclick: () => ((spShows = spEpisodes = spRecent = undefined), renderLibrary()) }, 'Try again');
 	if (spOpenShow) {
 		if (spEpisodes === undefined) {
 			box.replaceChildren(...spMsg('Loading episodes…'));
@@ -3055,13 +3056,14 @@ async function renderLibrary() {
 		);
 		return;
 	}
-	if (spShows === undefined) {
+	if (spShows === undefined || (spRecent === undefined && spotifyRemote.canRecent)) {
 		box.replaceChildren(...spMsg('Loading your shows…'));
-		spShows = await spotifyRemote.savedShows();
+		[spShows, spRecent] = await Promise.all([
+			spShows === undefined ? spotifyRemote.savedShows() : spShows,
+			spotifyRemote.canRecent ? (spRecent === undefined ? spotifyRemote.recentlyPlayed() : spRecent) : undefined,
+		]);
 		if (token !== spLibToken) return;
 	}
-	if (!spShows) return box.replaceChildren(...spMsg("Spotify didn't send your shows.", retry));
-	if (!spShows.length) return box.replaceChildren(...spMsg('No saved shows. Follow a podcast in Spotify and it shows up here.', retry));
 	const cont =
 		spResume?.uri &&
 		h(
@@ -3071,8 +3073,40 @@ async function renderLibrary() {
 			h('span', { class: 'sp-row-title' }, spResume.title),
 			h('span', { class: 'sp-row-sub' }, ['Continue', spResume.subtitle, spResume.duration ? `${fmtMin(spResume.duration - (spResume.progress || 0))} left` : ''].filter(Boolean).join(' · ')),
 		);
+	// Spotify's recently played list has tracks only; the podcast stays in Continue.
+	const recent = spotifyRemote.canRecent
+		? spRecent?.length
+			? [
+					h('p', { class: 'sp-head' }, 'Recently played'),
+					h(
+						'ul',
+						{ class: 'sp-list' },
+						spRecent.slice(0, 10).map((t) =>
+							h(
+								'li',
+								{},
+								h(
+									'button',
+									{ class: 'sp-row sp-show sp-track' + (t.uri === spCurrentUri ? ' is-current' : ''), type: 'button', 'data-uri': t.uri, onclick: () => spPlay({ uri: t.uri, name: t.name, subtitle: t.subtitle, played: true }) },
+									t.image ? h('img', { class: 'sp-art', src: t.image, alt: '' }) : h('span', { class: 'sp-art' }),
+									h('span', { class: 'sp-row-title' }, t.name),
+									h('span', { class: 'sp-row-sub' }, t.subtitle),
+								),
+							),
+						),
+					),
+				]
+			: []
+		: [h('button', { class: 'btn btn-quiet', type: 'button', onclick: () => spotifyRemote.login() }, 'Reconnect to see recently played')];
+	const shows = !spShows
+		? spMsg("Spotify didn't send your shows.", retry)
+		: !spShows.length
+			? spMsg('No saved shows. Follow a podcast in Spotify and it shows up here.', retry)
+			: null;
+	if (shows) return box.replaceChildren(cont || '', ...recent, ...shows);
 	box.replaceChildren(
 		cont || '',
+		...recent,
 		h('p', { class: 'sp-head' }, 'Your shows'),
 		h(
 			'ul',
@@ -3195,7 +3229,7 @@ function applyPodcastLink(raw, { save = true } = {}) {
 		podcastPlayer.clear();
 		spotifyRemote.logout();
 		podcastWePaused = false;
-		spShows = spEpisodes = undefined;
+		spShows = spEpisodes = spRecent = undefined;
 		spOpenShow = null;
 		spLibShown = false;
 		spCurrentUri = null;
