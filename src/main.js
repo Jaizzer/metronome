@@ -41,6 +41,7 @@ import { createTabPanel } from './tabpanel.js';
 import { saveTab, deleteTab, tabRecord, routineTab } from './tabstore.js';
 import { barRange, rangeText } from './slicer.js';
 import { restoreIndex } from './restore.js';
+import { SESSION_KEY, snapshot, resumable, rampBpm, cardText } from './resume.js';
 import {
 	newAttemptId,
 	mergeLog,
@@ -266,7 +267,7 @@ function sessionLost() {
 		clearTimeout(pendingSaves.get(key)?.timer);
 		pendingSaves.delete(key);
 	}
-	if (view === 'player') stopEverything();
+	if (view === 'player') stopEverything({ keepSession: true }); // signing back in offers Continue
 	recorder.clear();
 	currentSession = null;
 	setAuthMode('signin');
@@ -451,6 +452,7 @@ window.addEventListener('pagehide', () => {
 		pendingSaves.delete(key);
 	}
 	persistPending(sync.exportState(), true);
+	saveSession(); // where the practice stood, for the Continue card
 	setKeepalive(true);
 	flushSaves(); // settings only: an idempotent upsert
 });
@@ -640,6 +642,7 @@ $('signOutBtn').onclick = async () => {
 	await serial(() => {}); // let queued saves finish while still signed in
 	persistPending(sync.exportState(), true); // anything unsaved waits for the next sign-in
 	tabKey = null;
+	clearSession();
 	await signOut();
 	location.reload();
 };
@@ -648,6 +651,7 @@ async function bootApp(session) {
 	if (currentSession || booting) return;
 	booting = true;
 	currentSession = session;
+	let loaded = false;
 	// Pick up counts a closed tab (or an expired session) left unsaved.
 	await startPendingStore(session?.user?.id ?? 'anon');
 	showView('builder');
@@ -673,6 +677,7 @@ async function bootApp(session) {
 		showStats = settings.show_stats;
 		metVolume = parseFloat(settings.volume);
 		setSyncIndicator('synced');
+		loaded = true;
 	} catch (e) {
 		console.error('Initial load failed:', e);
 		setSyncIndicator('error');
@@ -682,6 +687,12 @@ async function bootApp(session) {
 
 	restoreSelection();
 	slideIndex = restoreIndex(practices, lsGet(SHOWN_KEY), selectedPracticeId);
+	// A practice a reload cut off: offer it back (no autoplay: audio needs a tap).
+	resumeSaved = lsGet(SESSION_KEY);
+	if (!resumable(resumeSaved, practices)) {
+		if (loaded && resumeSaved !== null) clearSession(); // stale or its routine is gone
+		resumeSaved = null;
+	}
 	renderBuilder();
 	applyStatsVisibility();
 	$('volumeSlider').value = metVolume;
@@ -1253,7 +1264,8 @@ let beatCounter = 0,
 	totalSectionTime = 0;
 let sectionStartBPM = 120,
 	sectionEndBPM = 120,
-	isRamping = false;
+	isRamping = false,
+	manualBPM = false; // tempo set by hand in this section (saved for the Continue card)
 
 function initAudio() {
 	mixWithOtherAudio();
@@ -1307,9 +1319,7 @@ function scheduler() {
 		const tickTime = nextTickTime;
 		if (!tabPanel.alongPlaying) playClick(tickTime, beat === 0); // with "Play with metronome", alphaTab clicks
 		if (isRamping && totalSectionTime > 0) {
-			const elapsed = totalSectionTime - timeLeftInSection;
-			const t = Math.min(elapsed / totalSectionTime, 1);
-			currentBPM = Math.round(sectionStartBPM + (sectionEndBPM - sectionStartBPM) * t);
+			currentBPM = rampBpm(sectionStartBPM, sectionEndBPM, totalSectionTime, timeLeftInSection);
 			adjustBPMDisplay();
 		}
 		nextTickTime += 60 / currentBPM;
@@ -1337,6 +1347,7 @@ function runSection(index) {
 	sectionEndBPM = ramp ? met.endBPM || met.startBPM : met.startBPM;
 	isRamping = Boolean(ramp && met.endBPM && met.endBPM !== met.startBPM);
 	currentBPM = sectionStartBPM;
+	manualBPM = false;
 	timeLeftInSection = met.duration;
 	totalSectionTime = met.duration;
 	adjustBPMDisplay();
@@ -1349,6 +1360,7 @@ function runSection(index) {
 
 	if (!schedulerInterval) schedulerInterval = setInterval(scheduler, 25);
 	startCountdown();
+	saveSession();
 }
 
 function formatClock(seconds) {
@@ -1367,6 +1379,7 @@ function startCountdown() {
 		timeLeftInSection--;
 		$('remaining').textContent = formatClock(timeLeftInSection);
 		updateProgressBar(totalSectionTime > 0 ? timeLeftInSection / totalSectionTime : 0);
+		saveSession();
 		if (timeLeftInSection <= 0) {
 			clearInterval(countdownInterval);
 			runSection(activeMetIndex + 1);
@@ -1393,7 +1406,9 @@ function adjustBPM(amount) {
 	if (!activePractice || activeMetIndex < 0) return;
 	currentBPM = Math.round(Math.max(20, Math.min(300, currentBPM + amount)));
 	isRamping = false;
+	manualBPM = true;
 	adjustBPMDisplay();
+	saveSession();
 	const met = activePractice.metronomes[activeMetIndex];
 	met.startBPM = currentBPM;
 	met.ramp = false;
@@ -1413,6 +1428,7 @@ function togglePause() {
 	renderPlayButton();
 	if (isPaused) lightUpDot(-1);
 	syncPodcast();
+	saveSession();
 }
 
 function renderPlayButton() {
@@ -1560,6 +1576,7 @@ document.addEventListener('visibilitychange', () => {
 
 function startRoutine(p, index = 0) {
 	if (!p.metronomes.length) return toast('Add a section first');
+	dropResumeOffer();
 	initAudio();
 	prepareSongSession(p);
 	activePractice = p;
@@ -1572,7 +1589,8 @@ function startRoutine(p, index = 0) {
 	$('player-title').focus();
 }
 
-function stopEverything({ finished = false } = {}) {
+function stopEverything({ finished = false, keepSession = false } = {}) {
+	if (!keepSession) clearSession(); // Stop or finished: nothing to continue
 	tabPanel.close();
 	isPaused = false;
 	clearInterval(schedulerInterval);
@@ -1595,6 +1613,93 @@ function stopEverything({ finished = false } = {}) {
 }
 
 $('stop').onclick = () => stopEverything();
+
+// ---------------- Continue after a reload (resume.js) ----------------
+// While a routine plays (or the Tab player is open) a snapshot sits under
+// SESSION_KEY; the next load offers it back as a Continue card.
+
+function saveSession() {
+	let s = null;
+	if (view === 'player' && activePractice && activeMetIndex >= 0) {
+		s = snapshot({
+			view: 'player',
+			practiceId: activePractice.id,
+			index: activeMetIndex,
+			timeLeft: timeLeftInSection,
+			bpm: manualBPM && !isRamping ? currentBPM : null,
+		});
+	} else if (view === 'tabplayer' && tabPlayerFor) {
+		s = snapshot({ view: 'tabplayer', practiceId: tabPlayerFor.id });
+	}
+	if (!s) return;
+	try {
+		localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+	} catch {
+		// private mode: a reload just lands on the builder
+	}
+}
+
+function clearSession() {
+	try {
+		localStorage.removeItem(SESSION_KEY);
+	} catch {
+		// private mode: nothing was saved
+	}
+}
+
+let resumeSaved = null; // the snapshot the card offers, until used or dismissed
+
+// The card follows the routines: an edit or delete elsewhere can take it away.
+function renderResume() {
+	const r = resumeSaved && resumable(resumeSaved, practices);
+	$('resume').hidden = !r;
+	if (!r) return;
+	const { title, subtitle } = cardText(r, formatClock);
+	$('resume-title').textContent = title;
+	$('resume-sub').textContent = subtitle;
+}
+
+function dropResumeOffer() {
+	if (!resumeSaved) return;
+	resumeSaved = null;
+	renderResume();
+}
+
+function continueSession() {
+	const r = resumeSaved && resumable(resumeSaved, practices);
+	dropResumeOffer();
+	if (!r) {
+		clearSession();
+		return toast('That practice can’t be continued');
+	}
+	if (r.view === 'tabplayer') return openTabPlayer(r.practice);
+	startRoutine(r.practice, r.index); // this tap is the gesture audio needs
+	if (activePractice !== r.practice || activeMetIndex !== r.index) return;
+	// Back to where the section stood (runSection started it from the top).
+	timeLeftInSection = r.timeLeft;
+	if (r.bpm !== null) {
+		// A tempo set by hand ends any ramp, as adjustBPM does.
+		isRamping = false;
+		manualBPM = true;
+		sectionStartBPM = sectionEndBPM = currentBPM = r.bpm;
+		$('bpm-unit').textContent = 'BPM';
+	} else if (isRamping) {
+		currentBPM = rampBpm(sectionStartBPM, sectionEndBPM, totalSectionTime, timeLeftInSection);
+	}
+	adjustBPMDisplay();
+	updateSongLine();
+	$('remaining').textContent = formatClock(timeLeftInSection);
+	updateProgressBar(totalSectionTime > 0 ? timeLeftInSection / totalSectionTime : 0);
+	saveSession();
+}
+
+$('resume-go').prepend(iconEl('play'));
+$('resume-go').onclick = continueSession;
+$('resume-x').replaceChildren(iconEl('cross'));
+$('resume-x').onclick = () => {
+	dropResumeOffer();
+	clearSession();
+};
 $('playPause').onclick = togglePause;
 $('plus').onclick = () => adjustBPM(1);
 $('minus').onclick = () => adjustBPM(-1);
@@ -2453,6 +2558,7 @@ function renderBuilder({ keepFocus = false } = {}) {
 		app.replaceChildren(...practices.map((p, pIdx) => renderRoutine(p, pIdx)));
 	}
 	renderRecordBar();
+	renderResume();
 	applyRoutineView();
 	if (focusSelector) {
 		const matches = document.querySelectorAll(focusSelector);
@@ -2678,6 +2784,7 @@ function pauseClickForTab() {
 // initial: the section to show selected ({ bars, range? }) or null.
 async function openTabPlayer(p, initial = null) {
 	if (view === 'tabplayer') return;
+	dropResumeOffer();
 	const my = ++tabPlayerToken;
 	tabPlayerFrom = view === 'player' ? 'player' : 'builder';
 	pauseClickForTab();
@@ -2687,6 +2794,7 @@ async function openTabPlayer(p, initial = null) {
 	$('tp-pos').textContent = '';
 	$('tp-main').replaceChildren(h('p', { class: 'tab-note tp-status' }, 'Loading the tab player…'));
 	showView('tabplayer');
+	saveSession();
 	$('tp-title').focus();
 	if (!wakeLock) {
 		tabPlayerWake = true;
@@ -2742,8 +2850,10 @@ function closeTabPlayer({ to = tabPlayerFrom } = {}) {
 		}
 		showView('player');
 		updatePlayerUI();
+		saveSession(); // the player's snapshot takes over again
 		$('player-title').focus();
 	} else {
+		clearSession();
 		showView('builder');
 		renderBuilder();
 	}
